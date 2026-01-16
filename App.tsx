@@ -25,11 +25,11 @@ import Svg, { Path } from 'react-native-svg';
 import { GestureHandlerRootView, PanGestureHandler, PanGestureHandlerGestureEvent } from 'react-native-gesture-handler';
 import * as ImagePicker from 'expo-image-picker';
 import * as MediaLibrary from 'expo-media-library';
+import * as FileSystem from 'expo-file-system';
 import ViewShot from 'react-native-view-shot';
-import { Audio } from 'expo-av';
 
 // Types
-type Screen = 'home' | 'breathe' | 'ground' | 'words' | 'games' | 'contacts' | 'tipp' | 'journal' | 'draw' | 'anchors' | 'safety' | 'pause' | 'sounds' | 'shred' | 'sos' | 'wins';
+type Screen = 'home' | 'breathe' | 'ground' | 'words' | 'games' | 'contacts' | 'tipp' | 'journal' | 'draw' | 'anchors' | 'safety' | 'pause' | 'shred' | 'sos' | 'wins';
 type BreathType = 'box' | '478' | 'calm';
 type ChatMessage = { role: 'user' | 'assistant'; content: string };
 type JournalEntry = { id: string; date: string; mood: string; content: string };
@@ -44,7 +44,6 @@ type SafetyPlan = {
 };
 type PauseNote = { id: string; label: string; message: string };
 type Win = { id: string; text: string; date: string };
-type SoundType = 'rain' | 'waves' | 'forest' | 'white' | 'fire';
 
 // Claude API configuration - Add your API key here or use environment variable
 const CLAUDE_API_KEY = ''; // Add your Anthropic API key
@@ -236,6 +235,7 @@ export default function App() {
   const [showAddCaption, setShowAddCaption] = useState(false);
   const [newAnchorUri, setNewAnchorUri] = useState('');
   const [newAnchorCaption, setNewAnchorCaption] = useState('');
+  const [failedImages, setFailedImages] = useState<Set<string>>(new Set());
 
   // Safety Plan state
   const [safetyPlan, setSafetyPlan] = useState<SafetyPlan>({
@@ -251,10 +251,6 @@ export default function App() {
   const [editingPauseNote, setEditingPauseNote] = useState<PauseNote | null>(null);
   const [newPauseLabel, setNewPauseLabel] = useState('');
   const [newPauseMessage, setNewPauseMessage] = useState('');
-
-  // Calm Sounds state
-  const [currentSound, setCurrentSound] = useState<Audio.Sound | null>(null);
-  const [playingSound, setPlayingSound] = useState<SoundType | null>(null);
 
   // Shred It state
   const [shredText, setShredText] = useState('');
@@ -289,15 +285,6 @@ export default function App() {
     loadPauseNotes();
     loadWins();
   }, []);
-
-  // Cleanup sound on unmount
-  useEffect(() => {
-    return () => {
-      if (currentSound) {
-        currentSound.unloadAsync();
-      }
-    };
-  }, [currentSound]);
 
   // Dave gentle bounce
   useEffect(() => {
@@ -510,6 +497,20 @@ export default function App() {
   };
 
   const pickAnchorImage = async () => {
+    // Request permission first
+    const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
+    if (status !== 'granted') {
+      Alert.alert(
+        'Permission needed',
+        'Dave needs access to your photos to add anchors. Please enable photo access in Settings.',
+        [
+          { text: 'Cancel', style: 'cancel' },
+          { text: 'Open Settings', onPress: () => Linking.openSettings() }
+        ]
+      );
+      return;
+    }
+
     const result = await ImagePicker.launchImageLibraryAsync({
       mediaTypes: ['images'],
       allowsEditing: true,
@@ -525,18 +526,34 @@ export default function App() {
 
   const saveAnchor = async () => {
     if (!newAnchorUri) return;
-    const newAnchor: AnchorImage = {
-      id: Date.now().toString(),
-      uri: newAnchorUri,
-      caption: newAnchorCaption.trim() || 'My anchor',
-    };
-    const updated = [...anchors, newAnchor];
-    setAnchors(updated);
-    await AsyncStorage.setItem('anchors', JSON.stringify(updated));
-    setNewAnchorUri('');
-    setNewAnchorCaption('');
-    setShowAddCaption(false);
-    Vibration.vibrate(100);
+
+    // Copy image to permanent location
+    const id = Date.now().toString();
+    const fileName = `anchor_${id}.jpg`;
+    const permanentUri = `${FileSystem.documentDirectory}${fileName}`;
+
+    try {
+      await FileSystem.copyAsync({
+        from: newAnchorUri,
+        to: permanentUri,
+      });
+
+      const newAnchor: AnchorImage = {
+        id,
+        uri: permanentUri,
+        caption: newAnchorCaption.trim() || 'My anchor',
+      };
+      const updated = [...anchors, newAnchor];
+      setAnchors(updated);
+      await AsyncStorage.setItem('anchors', JSON.stringify(updated));
+      setNewAnchorUri('');
+      setNewAnchorCaption('');
+      setShowAddCaption(false);
+      Vibration.vibrate(100);
+    } catch (e) {
+      console.error('Save anchor error:', e);
+      Alert.alert('Error', 'Could not save image. Please try again.');
+    }
   };
 
   const deleteAnchor = async (id: string) => {
@@ -546,6 +563,13 @@ export default function App() {
         text: 'Remove',
         style: 'destructive',
         onPress: async () => {
+          // Delete the image file if it's in our documents directory
+          const anchor = anchors.find(a => a.id === id);
+          if (anchor && anchor.uri.includes(FileSystem.documentDirectory || '')) {
+            try {
+              await FileSystem.deleteAsync(anchor.uri, { idempotent: true });
+            } catch (e) {}
+          }
           const updated = anchors.filter(a => a.id !== id);
           setAnchors(updated);
           await AsyncStorage.setItem('anchors', JSON.stringify(updated));
@@ -642,87 +666,6 @@ export default function App() {
         }
       }
     ]);
-  };
-
-  // ===== CALM SOUNDS =====
-  // Using reliable streaming URLs
-  const soundUrls: Record<SoundType, string> = {
-    rain: 'https://cdn.pixabay.com/audio/2022/05/13/audio_257112ce99.mp3',
-    waves: 'https://cdn.pixabay.com/audio/2022/03/10/audio_c8c8a73467.mp3',
-    forest: 'https://cdn.pixabay.com/audio/2022/08/04/audio_2dde668d05.mp3',
-    white: 'https://cdn.pixabay.com/audio/2022/03/15/audio_942de29241.mp3',
-    fire: 'https://cdn.pixabay.com/audio/2021/08/08/audio_dc8aa42d66.mp3',
-  };
-
-  const playSound = async (soundType: SoundType) => {
-    try {
-      // Stop and cleanup any existing sound first
-      if (currentSound) {
-        try {
-          await currentSound.stopAsync();
-          await currentSound.unloadAsync();
-        } catch (e) {
-          // Ignore cleanup errors
-        }
-        setCurrentSound(null);
-
-        // If tapping same sound, just stop
-        if (playingSound === soundType) {
-          setPlayingSound(null);
-          return;
-        }
-      }
-
-      setPlayingSound(null); // Reset state while loading
-
-      // Configure audio for background playback
-      await Audio.setAudioModeAsync({
-        playsInSilentModeIOS: true,
-        staysActiveInBackground: true,
-        shouldDuckAndroid: true,
-      });
-
-      // Load and play new sound
-      const { sound } = await Audio.Sound.createAsync(
-        { uri: soundUrls[soundType] },
-        {
-          isLooping: true,
-          volume: 0.7,
-          shouldPlay: true
-        }
-      );
-
-      setCurrentSound(sound);
-      setPlayingSound(soundType);
-      Vibration.vibrate(50);
-      setDaveMessage("Playing... tap again to stop 🎵");
-
-      // Handle playback ending
-      sound.setOnPlaybackStatusUpdate((status) => {
-        if (status.isLoaded && !status.isPlaying && !status.isBuffering) {
-          // Sound stopped unexpectedly
-        }
-      });
-
-    } catch (error) {
-      console.log('Sound error:', error);
-      setPlayingSound(null);
-      setCurrentSound(null);
-      Alert.alert('Sound unavailable', 'Could not load this sound. Try another one.');
-    }
-  };
-
-  const stopAllSounds = async () => {
-    try {
-      if (currentSound) {
-        await currentSound.stopAsync();
-        await currentSound.unloadAsync();
-      }
-    } catch (e) {
-      // Ignore errors
-    }
-    setCurrentSound(null);
-    setPlayingSound(null);
   };
 
   // ===== SHRED IT =====
@@ -1128,11 +1071,6 @@ export default function App() {
         <TouchableOpacity style={[styles.menuButton, { backgroundColor: '#E5E5FF' }]} onPress={() => setScreen('pause')}>
           <Text style={styles.menuIcon}>⏸️</Text>
           <Text style={styles.menuText}>Pause</Text>
-        </TouchableOpacity>
-
-        <TouchableOpacity style={[styles.menuButton, { backgroundColor: '#E5F5FF' }]} onPress={() => setScreen('sounds')}>
-          <Text style={styles.menuIcon}>🎵</Text>
-          <Text style={styles.menuText}>Sounds</Text>
         </TouchableOpacity>
 
         <TouchableOpacity style={[styles.menuButton, { backgroundColor: '#FFE5F0' }]} onPress={() => setScreen('shred')}>
@@ -1897,7 +1835,18 @@ export default function App() {
             style={styles.anchorCard}
             onPress={() => setSelectedAnchor(anchor)}
           >
-            <Image source={{ uri: anchor.uri }} style={styles.anchorImage} />
+            {failedImages.has(anchor.id) ? (
+              <View style={[styles.anchorImage, styles.anchorImagePlaceholder]}>
+                <Text style={styles.anchorPlaceholderIcon}>📷</Text>
+                <Text style={styles.anchorPlaceholderText}>Image unavailable</Text>
+              </View>
+            ) : (
+              <Image
+                source={{ uri: anchor.uri }}
+                style={styles.anchorImage}
+                onError={() => setFailedImages(prev => new Set(prev).add(anchor.id))}
+              />
+            )}
             <Text style={styles.anchorCaption} numberOfLines={1}>{anchor.caption}</Text>
           </TouchableOpacity>
         ))}
@@ -1916,7 +1865,19 @@ export default function App() {
           <View style={styles.anchorModalContent}>
             {selectedAnchor && (
               <>
-                <Image source={{ uri: selectedAnchor.uri }} style={styles.anchorModalImage} resizeMode="contain" />
+                {failedImages.has(selectedAnchor.id) ? (
+                  <View style={[styles.anchorModalImage, styles.anchorImagePlaceholder]}>
+                    <Text style={styles.anchorPlaceholderIcon}>📷</Text>
+                    <Text style={styles.anchorPlaceholderText}>Image unavailable</Text>
+                  </View>
+                ) : (
+                  <Image
+                    source={{ uri: selectedAnchor.uri }}
+                    style={styles.anchorModalImage}
+                    resizeMode="contain"
+                    onError={() => setFailedImages(prev => new Set(prev).add(selectedAnchor.id))}
+                  />
+                )}
                 <Text style={styles.anchorModalCaption}>{selectedAnchor.caption}</Text>
                 <View style={styles.anchorModalButtons}>
                   <TouchableOpacity style={styles.anchorCloseButton} onPress={() => setSelectedAnchor(null)}>
@@ -2032,41 +1993,6 @@ export default function App() {
         </View>
       </Modal>
     </ScrollView>
-  );
-
-  const renderSounds = () => (
-    <View style={styles.screenContainer}>
-      <Text style={styles.screenTitle}>Calm Sounds</Text>
-      <Text style={styles.soundsSubtitle}>Tap to play, tap again to stop</Text>
-
-      <View style={styles.soundsGrid}>
-        {([
-          { type: 'rain' as SoundType, icon: '🌧️', label: 'Rain' },
-          { type: 'waves' as SoundType, icon: '🌊', label: 'Waves' },
-          { type: 'forest' as SoundType, icon: '🌲', label: 'Forest' },
-          { type: 'white' as SoundType, icon: '📻', label: 'White Noise' },
-          { type: 'fire' as SoundType, icon: '🔥', label: 'Fireplace' },
-        ]).map(sound => (
-          <TouchableOpacity
-            key={sound.type}
-            style={[styles.soundButton, playingSound === sound.type && styles.soundButtonActive]}
-            onPress={() => playSound(sound.type)}
-          >
-            <Text style={styles.soundIcon}>{sound.icon}</Text>
-            <Text style={styles.soundLabel}>{sound.label}</Text>
-            {playingSound === sound.type && <Text style={styles.playingIndicator}>▶️ Playing</Text>}
-          </TouchableOpacity>
-        ))}
-      </View>
-
-      {playingSound && (
-        <TouchableOpacity style={styles.stopAllButton} onPress={stopAllSounds}>
-          <Text style={styles.stopAllText}>⏹️ Stop Sound</Text>
-        </TouchableOpacity>
-      )}
-
-      <Text style={styles.daveHint}>{daveMessage}</Text>
-    </View>
   );
 
   const renderShred = () => (
@@ -2209,7 +2135,6 @@ export default function App() {
           setScreen('home');
           stopBreathing();
           resetGrounding();
-          stopAllSounds();
         }}>
           <Text style={styles.backText}>← Dave</Text>
         </TouchableOpacity>
@@ -2227,7 +2152,6 @@ export default function App() {
       {screen === 'safety' && renderSafetyPlan()}
       {screen === 'anchors' && renderAnchors()}
       {screen === 'pause' && renderPauseNotes()}
-      {screen === 'sounds' && renderSounds()}
       {screen === 'shred' && renderShred()}
       {screen === 'sos' && renderSOS()}
       {screen === 'wins' && renderWins()}
@@ -3309,6 +3233,19 @@ const styles = StyleSheet.create({
     width: '100%',
     height: 120,
   },
+  anchorImagePlaceholder: {
+    backgroundColor: '#F0F0F5',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  anchorPlaceholderIcon: {
+    fontSize: 32,
+    marginBottom: 5,
+  },
+  anchorPlaceholderText: {
+    fontSize: 12,
+    color: '#999',
+  },
   anchorCaption: {
     padding: 10,
     fontSize: 14,
@@ -3527,64 +3464,6 @@ const styles = StyleSheet.create({
   pauseMessageInput: {
     minHeight: 100,
     textAlignVertical: 'top',
-  },
-
-  // Calm Sounds
-  soundsSubtitle: {
-    fontSize: 14,
-    color: '#666',
-    textAlign: 'center',
-    marginBottom: 30,
-  },
-  soundsGrid: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    justifyContent: 'center',
-    gap: 15,
-  },
-  soundButton: {
-    width: '45%',
-    backgroundColor: '#fff',
-    borderRadius: 20,
-    padding: 20,
-    alignItems: 'center',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 4,
-    elevation: 3,
-  },
-  soundButtonActive: {
-    backgroundColor: '#E8D5F2',
-    borderColor: '#9B6BB3',
-    borderWidth: 2,
-  },
-  soundIcon: {
-    fontSize: 40,
-    marginBottom: 10,
-  },
-  soundLabel: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: '#5D4E6D',
-  },
-  playingIndicator: {
-    fontSize: 12,
-    color: '#9B6BB3',
-    marginTop: 5,
-  },
-  stopAllButton: {
-    backgroundColor: '#FFE5E5',
-    paddingVertical: 15,
-    paddingHorizontal: 30,
-    borderRadius: 25,
-    marginTop: 30,
-    alignSelf: 'center',
-  },
-  stopAllText: {
-    fontSize: 16,
-    color: '#D46A6A',
-    fontWeight: '600',
   },
 
   // Shred It

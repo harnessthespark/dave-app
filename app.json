@@ -13,12 +13,12 @@
       "backgroundColor": "#FAFAFF"
     },
     "ios": {
-      "supportsTablet": true,
+      "supportsTablet": false,
       "bundleIdentifier": "com.lisagills.dave",
       "infoPlist": {
         "ITSAppUsesNonExemptEncryption": false,
-        "NSPhotoLibraryUsageDescription": "Dave needs access to save your drawings to your photo library.",
-        "NSPhotoLibraryAddUsageDescription": "Dave needs access to save your drawings to your photo library."
+        "NSPhotoLibraryUsageDescription": "Dave needs access to your photos to add calming images to your Anchors and save your drawings.",
+        "NSPhotoLibraryAddUsageDescription": "Dave needs access to save your drawings and anchors to your photo library."
       },
       "requireFullScreen": false
     },
