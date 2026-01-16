@@ -560,35 +560,48 @@ export default function App() {
     const id = Date.now().toString();
 
     try {
-      // Check if documentDirectory exists
-      if (!FileSystem.documentDirectory) {
-        throw new Error('Document directory not available');
-      }
-      console.log('🔵 Step 1: Document directory:', FileSystem.documentDirectory);
+      let finalUri: string;
 
-      // Save base64 directly to a new file in documents directory
-      // Using the base64 we captured from ImagePicker (more reliable!)
-      const fileName = `anchor_${id}.jpg`;
-      const permanentUri = `${FileSystem.documentDirectory}${fileName}`;
-      console.log('🔵 Step 2: Writing to:', permanentUri);
+      // Try to save to file system with fallbacks
+      const baseDir = FileSystem.documentDirectory || FileSystem.cacheDirectory;
+      console.log('🔵 Step 1: Available directory:', baseDir);
 
-      await FileSystem.writeAsStringAsync(permanentUri, newAnchorBase64, {
-        encoding: FileSystem.EncodingType.Base64,
-      });
-      console.log('🔵 Step 2 complete: File written');
+      if (baseDir) {
+        // Try to save as a file
+        const fileName = `anchor_${id}.jpg`;
+        const permanentUri = `${baseDir}${fileName}`;
+        console.log('🔵 Step 2: Writing to:', permanentUri);
 
-      // Verify the file was written
-      console.log('🔵 Step 3: Verifying written file...');
-      const destInfo = await FileSystem.getInfoAsync(permanentUri);
-      console.log('🔵 Step 3 result:', JSON.stringify(destInfo));
+        try {
+          await FileSystem.writeAsStringAsync(permanentUri, newAnchorBase64, {
+            encoding: FileSystem.EncodingType.Base64,
+          });
+          console.log('🔵 Step 2 complete: File written');
 
-      if (!destInfo.exists) {
-        throw new Error('File was not written successfully');
+          // Verify the file was written
+          console.log('🔵 Step 3: Verifying written file...');
+          const destInfo = await FileSystem.getInfoAsync(permanentUri);
+          console.log('🔵 Step 3 result:', JSON.stringify(destInfo));
+
+          if (destInfo.exists) {
+            finalUri = permanentUri;
+          } else {
+            console.log('⚠️ File verification failed, using data URI fallback');
+            finalUri = `data:image/jpeg;base64,${newAnchorBase64}`;
+          }
+        } catch (writeError) {
+          console.log('⚠️ File write failed, using data URI fallback:', writeError);
+          finalUri = `data:image/jpeg;base64,${newAnchorBase64}`;
+        }
+      } else {
+        // No file system directory available - use data URI directly
+        console.log('🔵 No file system available, using data URI');
+        finalUri = `data:image/jpeg;base64,${newAnchorBase64}`;
       }
 
       const newAnchor: AnchorImage = {
         id,
-        uri: permanentUri,
+        uri: finalUri,
         caption: newAnchorCaption.trim() || 'My anchor',
       };
       const updated = [...anchors, newAnchor];
@@ -601,7 +614,7 @@ export default function App() {
       setNewAnchorCaption('');
       setShowAddCaption(false);
       Vibration.vibrate(100);
-      console.log('✅ Anchor saved successfully!');
+      console.log('✅ Anchor saved successfully with URI type:', finalUri.startsWith('data:') ? 'data URI' : 'file URI');
     } catch (e: any) {
       console.error('❌ Save anchor error:', e);
       console.error('Error message:', e.message);
@@ -616,12 +629,15 @@ export default function App() {
         text: 'Remove',
         style: 'destructive',
         onPress: async () => {
-          // Delete the image file if it's in our documents directory
+          // Delete the image file if it's a file URI (not data URI)
           const anchor = anchors.find(a => a.id === id);
-          if (anchor && anchor.uri.includes(FileSystem.documentDirectory || '')) {
-            try {
-              await FileSystem.deleteAsync(anchor.uri, { idempotent: true });
-            } catch (e) {}
+          if (anchor && !anchor.uri.startsWith('data:')) {
+            const baseDir = FileSystem.documentDirectory || FileSystem.cacheDirectory;
+            if (baseDir && anchor.uri.includes(baseDir)) {
+              try {
+                await FileSystem.deleteAsync(anchor.uri, { idempotent: true });
+              } catch (e) {}
+            }
           }
           const updated = anchors.filter(a => a.id !== id);
           setAnchors(updated);
