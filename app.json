@@ -1,30 +1,42 @@
 {
   "expo": {
-    "name": "dave-app",
+    "name": "Dave",
     "slug": "dave-app",
     "version": "1.0.0",
-    "orientation": "portrait",
-    "icon": "./assets/icon.png",
+    "orientation": "default",
+    "icon": "./assets/dave.png",
     "userInterfaceStyle": "light",
     "newArchEnabled": true,
     "splash": {
-      "image": "./assets/splash-icon.png",
+      "image": "./assets/dave.png",
       "resizeMode": "contain",
-      "backgroundColor": "#ffffff"
+      "backgroundColor": "#FAFAFF"
     },
     "ios": {
-      "supportsTablet": true
+      "supportsTablet": true,
+      "bundleIdentifier": "com.lisagills.dave",
+      "infoPlist": {
+        "ITSAppUsesNonExemptEncryption": false,
+        "NSPhotoLibraryUsageDescription": "Dave needs access to save your drawings to your photo library.",
+        "NSPhotoLibraryAddUsageDescription": "Dave needs access to save your drawings to your photo library."
+      },
+      "requireFullScreen": false
     },
     "android": {
       "adaptiveIcon": {
-        "foregroundImage": "./assets/adaptive-icon.png",
-        "backgroundColor": "#ffffff"
+        "foregroundImage": "./assets/dave.png",
+        "backgroundColor": "#FAF8FC"
       },
       "edgeToEdgeEnabled": true,
-      "predictiveBackGestureEnabled": false
+      "package": "com.lisagills.dave"
     },
     "web": {
-      "favicon": "./assets/favicon.png"
+      "favicon": "./assets/dave.png"
+    },
+    "extra": {
+      "eas": {
+        "projectId": "beac671b-4e29-43db-87c6-4cd755df1108"
+      }
     }
   }
 }
