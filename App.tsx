@@ -234,6 +234,7 @@ export default function App() {
   const [selectedAnchor, setSelectedAnchor] = useState<AnchorImage | null>(null);
   const [showAddCaption, setShowAddCaption] = useState(false);
   const [newAnchorUri, setNewAnchorUri] = useState('');
+  const [newAnchorBase64, setNewAnchorBase64] = useState('');
   const [newAnchorCaption, setNewAnchorCaption] = useState('');
   const [failedImages, setFailedImages] = useState<Set<string>>(new Set());
 
@@ -497,8 +498,12 @@ export default function App() {
   };
 
   const pickAnchorImage = async () => {
+    console.log('🟢 pickAnchorImage: Starting...');
+
     // Request permission first
     const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
+    console.log('🟢 pickAnchorImage: Permission status =', status);
+
     if (status !== 'granted') {
       Alert.alert(
         'Permission needed',
@@ -516,16 +521,41 @@ export default function App() {
       allowsEditing: true,
       aspect: [4, 3],
       quality: 0.8,
+      base64: true, // Get base64 directly - more reliable!
     });
 
+    console.log('🟢 pickAnchorImage: Result canceled =', result.canceled);
+
     if (!result.canceled && result.assets[0]) {
-      setNewAnchorUri(result.assets[0].uri);
+      const asset = result.assets[0];
+      console.log('🟢 pickAnchorImage: Asset URI =', asset.uri);
+      console.log('🟢 pickAnchorImage: Has base64 =', !!asset.base64);
+      console.log('🟢 pickAnchorImage: Base64 length =', asset.base64?.length || 0);
+
+      // Store both URI and base64 data
+      setNewAnchorUri(asset.uri);
+      // @ts-ignore - Store base64 for later use
+      setNewAnchorBase64(asset.base64 || '');
       setShowAddCaption(true);
     }
   };
 
   const saveAnchor = async () => {
-    if (!newAnchorUri) return;
+    console.log('🔵 saveAnchor: Starting...');
+    console.log('🔵 Has URI:', !!newAnchorUri);
+    console.log('🔵 Has base64:', !!newAnchorBase64);
+    console.log('🔵 Base64 length:', newAnchorBase64.length);
+
+    if (!newAnchorUri) {
+      console.log('❌ saveAnchor: No newAnchorUri');
+      return;
+    }
+
+    if (!newAnchorBase64) {
+      console.log('❌ saveAnchor: No base64 data - this should not happen');
+      Alert.alert('Error', 'Image data not available. Please try selecting the image again.');
+      return;
+    }
 
     const id = Date.now().toString();
 
@@ -534,19 +564,27 @@ export default function App() {
       if (!FileSystem.documentDirectory) {
         throw new Error('Document directory not available');
       }
+      console.log('🔵 Step 1: Document directory:', FileSystem.documentDirectory);
 
-      // Read the image as base64 (more reliable than copyAsync)
-      const base64 = await FileSystem.readAsStringAsync(newAnchorUri, {
-        encoding: FileSystem.EncodingType.Base64,
-      });
-
-      // Save base64 to a new file in documents directory
+      // Save base64 directly to a new file in documents directory
+      // Using the base64 we captured from ImagePicker (more reliable!)
       const fileName = `anchor_${id}.jpg`;
       const permanentUri = `${FileSystem.documentDirectory}${fileName}`;
+      console.log('🔵 Step 2: Writing to:', permanentUri);
 
-      await FileSystem.writeAsStringAsync(permanentUri, base64, {
+      await FileSystem.writeAsStringAsync(permanentUri, newAnchorBase64, {
         encoding: FileSystem.EncodingType.Base64,
       });
+      console.log('🔵 Step 2 complete: File written');
+
+      // Verify the file was written
+      console.log('🔵 Step 3: Verifying written file...');
+      const destInfo = await FileSystem.getInfoAsync(permanentUri);
+      console.log('🔵 Step 3 result:', JSON.stringify(destInfo));
+
+      if (!destInfo.exists) {
+        throw new Error('File was not written successfully');
+      }
 
       const newAnchor: AnchorImage = {
         id,
@@ -556,12 +594,17 @@ export default function App() {
       const updated = [...anchors, newAnchor];
       setAnchors(updated);
       await AsyncStorage.setItem('anchors', JSON.stringify(updated));
+
+      // Clear all anchor creation state
       setNewAnchorUri('');
+      setNewAnchorBase64('');
       setNewAnchorCaption('');
       setShowAddCaption(false);
       Vibration.vibrate(100);
+      console.log('✅ Anchor saved successfully!');
     } catch (e: any) {
-      console.error('Save anchor error:', e);
+      console.error('❌ Save anchor error:', e);
+      console.error('Error message:', e.message);
       Alert.alert('Error', `Could not save image: ${e.message || 'Unknown error'}`);
     }
   };
