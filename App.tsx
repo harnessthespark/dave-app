@@ -527,15 +527,25 @@ export default function App() {
   const saveAnchor = async () => {
     if (!newAnchorUri) return;
 
-    // Copy image to permanent location
     const id = Date.now().toString();
-    const fileName = `anchor_${id}.jpg`;
-    const permanentUri = `${FileSystem.documentDirectory}${fileName}`;
 
     try {
-      await FileSystem.copyAsync({
-        from: newAnchorUri,
-        to: permanentUri,
+      // Check if documentDirectory exists
+      if (!FileSystem.documentDirectory) {
+        throw new Error('Document directory not available');
+      }
+
+      // Read the image as base64 (more reliable than copyAsync)
+      const base64 = await FileSystem.readAsStringAsync(newAnchorUri, {
+        encoding: FileSystem.EncodingType.Base64,
+      });
+
+      // Save base64 to a new file in documents directory
+      const fileName = `anchor_${id}.jpg`;
+      const permanentUri = `${FileSystem.documentDirectory}${fileName}`;
+
+      await FileSystem.writeAsStringAsync(permanentUri, base64, {
+        encoding: FileSystem.EncodingType.Base64,
       });
 
       const newAnchor: AnchorImage = {
@@ -550,9 +560,9 @@ export default function App() {
       setNewAnchorCaption('');
       setShowAddCaption(false);
       Vibration.vibrate(100);
-    } catch (e) {
+    } catch (e: any) {
       console.error('Save anchor error:', e);
-      Alert.alert('Error', 'Could not save image. Please try again.');
+      Alert.alert('Error', `Could not save image: ${e.message || 'Unknown error'}`);
     }
   };
 
