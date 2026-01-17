@@ -1821,7 +1821,15 @@ export default function App() {
   );
 
   const renderSafetyPlan = () => (
-    <ScrollView style={styles.screenContainer} contentContainerStyle={styles.safetyContent}>
+    <KeyboardAvoidingView
+      style={styles.screenContainer}
+      behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+      keyboardVerticalOffset={100}
+    >
+    <ScrollView
+      contentContainerStyle={styles.safetyContent}
+      keyboardShouldPersistTaps="handled"
+    >
       <Image source={require('./assets/dave.png')} style={styles.safetyDave} resizeMode="contain" />
       <Text style={styles.screenTitle}>My Safety Plan</Text>
       <Text style={styles.safetySubtitle}>Fill this out when you're feeling okay, so it's ready when you need it</Text>
@@ -1890,6 +1898,7 @@ export default function App() {
 
       <Text style={styles.daveHint}>{daveMessage}</Text>
     </ScrollView>
+    </KeyboardAvoidingView>
   );
 
   const renderAnchors = () => (
