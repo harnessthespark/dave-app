@@ -1376,8 +1376,9 @@ export default function App() {
     <ScrollView style={styles.screenContainer} contentContainerStyle={styles.contactsContent}>
       <Text style={styles.screenTitle}>Reach Out</Text>
 
-      {/* Personal Contacts */}
-      <Text style={styles.contactSection}>Your People</Text>
+      {/* Crisis Contacts - Mental health professionals */}
+      <Text style={styles.contactSection}>🆘 My Crisis Contacts</Text>
+      <Text style={styles.contactSubtext}>Mental health crisis team, therapist, counsellor</Text>
       {personalContacts.map((contact, index) => (
         <View key={index} style={styles.contactCard}>
           <View style={styles.contactInfo}>
@@ -1854,7 +1855,7 @@ export default function App() {
         placeholderTextColor="#999"
       />
 
-      <Text style={styles.safetyLabel}>👥 People I can reach out to:</Text>
+      <Text style={styles.safetyLabel}>💜 My Loved Ones (family, partner, friends):</Text>
       {safetyPlan.supportPeople.map((person, index) => (
         <View key={index} style={styles.supportPersonRow}>
           <TextInput
@@ -2681,7 +2682,13 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     color: '#5D4E6D',
     marginTop: 20,
+    marginBottom: 5,
+  },
+  contactSubtext: {
+    fontSize: 14,
+    color: '#8B7B9B',
     marginBottom: 15,
+    fontStyle: 'italic',
   },
   contactCard: {
     backgroundColor: '#fff',
