@@ -20,7 +20,8 @@
   "submit": {
     "production": {
       "ios": {
-        "appleId": "lisa@harnessthespark.com"
+        "appleId": "lisa@harnessthespark.com",
+        "ascAppId": "6757913823"
       }
     }
   }
