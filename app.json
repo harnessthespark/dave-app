@@ -15,7 +15,7 @@
     "ios": {
       "supportsTablet": false,
       "bundleIdentifier": "com.lisagills.dave",
-      "buildNumber": "5",
+      "buildNumber": "7",
       "infoPlist": {
         "ITSAppUsesNonExemptEncryption": false,
         "NSPhotoLibraryUsageDescription": "Dave needs access to your photos to add calming images to your Anchors and save your drawings.",
@@ -29,7 +29,8 @@
         "backgroundColor": "#FAF8FC"
       },
       "edgeToEdgeEnabled": true,
-      "package": "com.lisagills.dave"
+      "package": "com.lisagills.dave",
+      "versionCode": 2
     },
     "web": {
       "favicon": "./assets/dave.png"
