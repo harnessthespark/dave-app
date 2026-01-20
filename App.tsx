@@ -270,6 +270,10 @@ export default function App() {
     { id: 'tipp', icon: '🧊', label: 'TIPP', screen: 'tipp' as Screen },
   ]);
 
+  // Onboarding state
+  const [hasSeenOnboarding, setHasSeenOnboarding] = useState<boolean | null>(null);
+  const [onboardingStep, setOnboardingStep] = useState(0);
+
   const daveAnim = useRef(new Animated.Value(1)).current;
   const breathAnim = useRef(new Animated.Value(1)).current;
   const drawingRef = useRef<ViewShot>(null);
@@ -277,6 +281,7 @@ export default function App() {
 
   // Load saved data
   useEffect(() => {
+    loadOnboardingStatus();
     loadContacts();
     loadJournalEntries();
     loadAffirmations();
@@ -304,6 +309,22 @@ export default function App() {
     const messages = screen === 'contacts' ? daveMessages.crisis : daveMessages[screen] || daveMessages.home;
     setDaveMessage(messages[Math.floor(Math.random() * messages.length)]);
   }, [screen]);
+
+  const loadOnboardingStatus = async () => {
+    try {
+      const seen = await AsyncStorage.getItem('hasSeenOnboarding');
+      setHasSeenOnboarding(seen === 'true');
+    } catch (e) {
+      setHasSeenOnboarding(false);
+    }
+  };
+
+  const completeOnboarding = async () => {
+    try {
+      await AsyncStorage.setItem('hasSeenOnboarding', 'true');
+      setHasSeenOnboarding(true);
+    } catch (e) {}
+  };
 
   const loadContacts = async () => {
     try {
@@ -2205,6 +2226,116 @@ export default function App() {
     </ScrollView>
   );
 
+  // Onboarding slides
+  const onboardingSlides = [
+    {
+      title: "Hi, I'm Dave",
+      subtitle: "Your calming companion",
+      description: "I'm here to help you through tough moments. No judgement, just support.",
+      icon: "💜",
+    },
+    {
+      title: "Breathe & Ground",
+      subtitle: "Calm your body",
+      description: "Try box breathing when anxious, or the 5-4-3-2-1 grounding technique to come back to the present.",
+      icon: "🌬️",
+    },
+    {
+      title: "Your Safe Space",
+      subtitle: "Personal tools",
+      description: "Add photos that calm you to Anchors, write in your journal, or use the drawing canvas to express yourself.",
+      icon: "🖼️",
+    },
+    {
+      title: "Crisis Support",
+      subtitle: "Help when you need it",
+      description: "Quick access to crisis lines and your personal contacts. The SOS button is always there for tough moments.",
+      icon: "🆘",
+    },
+    {
+      title: "Ready to Start",
+      subtitle: "Your data stays private",
+      description: "Everything you save stays on your device. Tap below to begin your journey with Dave.",
+      icon: "🔒",
+    },
+  ];
+
+  const renderOnboarding = () => (
+    <View style={styles.onboardingContainer}>
+      <View style={styles.onboardingContent}>
+        <Text style={styles.onboardingIcon}>{onboardingSlides[onboardingStep].icon}</Text>
+        <Image source={require('./assets/dave.png')} style={styles.onboardingDave} />
+        <Text style={styles.onboardingTitle}>{onboardingSlides[onboardingStep].title}</Text>
+        <Text style={styles.onboardingSubtitle}>{onboardingSlides[onboardingStep].subtitle}</Text>
+        <Text style={styles.onboardingDescription}>{onboardingSlides[onboardingStep].description}</Text>
+      </View>
+
+      <View style={styles.onboardingDots}>
+        {onboardingSlides.map((_, index) => (
+          <View
+            key={index}
+            style={[
+              styles.onboardingDot,
+              index === onboardingStep && styles.onboardingDotActive,
+            ]}
+          />
+        ))}
+      </View>
+
+      <View style={styles.onboardingButtons}>
+        {onboardingStep > 0 && (
+          <TouchableOpacity
+            style={styles.onboardingButtonSecondary}
+            onPress={() => setOnboardingStep(onboardingStep - 1)}
+          >
+            <Text style={styles.onboardingButtonSecondaryText}>Back</Text>
+          </TouchableOpacity>
+        )}
+        <TouchableOpacity
+          style={[styles.onboardingButton, onboardingStep === 0 && { flex: 1 }]}
+          onPress={() => {
+            if (onboardingStep < onboardingSlides.length - 1) {
+              setOnboardingStep(onboardingStep + 1);
+            } else {
+              completeOnboarding();
+            }
+          }}
+        >
+          <Text style={styles.onboardingButtonText}>
+            {onboardingStep === onboardingSlides.length - 1 ? "Let's Go" : "Next"}
+          </Text>
+        </TouchableOpacity>
+      </View>
+
+      {onboardingStep === 0 && (
+        <TouchableOpacity onPress={completeOnboarding} style={styles.skipButton}>
+          <Text style={styles.skipText}>Skip intro</Text>
+        </TouchableOpacity>
+      )}
+    </View>
+  );
+
+  // Show loading while checking onboarding status
+  if (hasSeenOnboarding === null) {
+    return (
+      <SafeAreaView style={styles.container}>
+        <View style={styles.loadingContainer}>
+          <Image source={require('./assets/dave.png')} style={styles.loadingDave} />
+        </View>
+      </SafeAreaView>
+    );
+  }
+
+  // Show onboarding for first-time users
+  if (!hasSeenOnboarding) {
+    return (
+      <SafeAreaView style={styles.container}>
+        <StatusBar style="dark" />
+        {renderOnboarding()}
+      </SafeAreaView>
+    );
+  }
+
   return (
     <SafeAreaView style={styles.container}>
       <StatusBar style="dark" />
@@ -2249,6 +2380,111 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: '#FAFAFF',
   },
+  // Onboarding styles
+  onboardingContainer: {
+    flex: 1,
+    padding: 24,
+    justifyContent: 'space-between',
+  },
+  onboardingContent: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingTop: 40,
+  },
+  onboardingIcon: {
+    fontSize: 50,
+    marginBottom: 10,
+  },
+  onboardingDave: {
+    width: 150,
+    height: 150,
+    marginBottom: 20,
+  },
+  onboardingTitle: {
+    fontSize: 32,
+    fontWeight: 'bold',
+    color: '#5D4E6D',
+    textAlign: 'center',
+    marginBottom: 8,
+  },
+  onboardingSubtitle: {
+    fontSize: 18,
+    color: '#8B5CF6',
+    textAlign: 'center',
+    marginBottom: 16,
+    fontWeight: '500',
+  },
+  onboardingDescription: {
+    fontSize: 16,
+    color: '#6B7280',
+    textAlign: 'center',
+    lineHeight: 24,
+    paddingHorizontal: 20,
+  },
+  onboardingDots: {
+    flexDirection: 'row',
+    justifyContent: 'center',
+    marginBottom: 30,
+  },
+  onboardingDot: {
+    width: 10,
+    height: 10,
+    borderRadius: 5,
+    backgroundColor: '#E0D6EB',
+    marginHorizontal: 5,
+  },
+  onboardingDotActive: {
+    backgroundColor: '#8B5CF6',
+    width: 24,
+  },
+  onboardingButtons: {
+    flexDirection: 'row',
+    gap: 12,
+  },
+  onboardingButton: {
+    flex: 2,
+    backgroundColor: '#8B5CF6',
+    padding: 18,
+    borderRadius: 16,
+    alignItems: 'center',
+  },
+  onboardingButtonText: {
+    color: 'white',
+    fontSize: 18,
+    fontWeight: '600',
+  },
+  onboardingButtonSecondary: {
+    flex: 1,
+    backgroundColor: '#F3E8FF',
+    padding: 18,
+    borderRadius: 16,
+    alignItems: 'center',
+  },
+  onboardingButtonSecondaryText: {
+    color: '#8B5CF6',
+    fontSize: 18,
+    fontWeight: '600',
+  },
+  skipButton: {
+    alignItems: 'center',
+    marginTop: 20,
+    padding: 10,
+  },
+  skipText: {
+    color: '#9CA3AF',
+    fontSize: 14,
+  },
+  loadingContainer: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  loadingDave: {
+    width: 150,
+    height: 150,
+  },
+  // End onboarding styles
   backButton: {
     padding: 20,
     paddingTop: 12,
