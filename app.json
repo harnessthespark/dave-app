@@ -35,6 +35,23 @@
     "web": {
       "favicon": "./assets/dave.png"
     },
+    "plugins": [
+      [
+        "expo-image-picker",
+        {
+          "photosPermission": "Dave needs access to your photos to add calming images to your Anchors and save your drawings.",
+          "videoLibraryPermission": "Dave needs access to your videos to add calming videos to your Anchors."
+        }
+      ],
+      [
+        "expo-media-library",
+        {
+          "photosPermission": "Dave needs access to your photos to add calming images to your Anchors and save your drawings.",
+          "savePhotosPermission": "Dave needs access to save your drawings and anchors to your photo library.",
+          "isAccessMediaLocationEnabled": true
+        }
+      ]
+    ],
     "extra": {
       "eas": {
         "projectId": "beac671b-4e29-43db-87c6-4cd755df1108"
