@@ -9,1573 +9,3050 @@ import {
   Image,
   Animated,
   Modal,
+  Linking,
   Vibration,
   TextInput,
   Alert,
-  Dimensions,
+  KeyboardAvoidingView,
+  Platform,
+  ActivityIndicator,
+  Share,
 } from 'react-native';
+import * as Clipboard from 'expo-clipboard';
 import { StatusBar } from 'expo-status-bar';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { GestureHandlerRootView } from 'react-native-gesture-handler';
-
-const { width } = Dimensions.get('window');
+import Svg, { Path } from 'react-native-svg';
+import { GestureHandlerRootView, PanGestureHandler, PanGestureHandlerGestureEvent } from 'react-native-gesture-handler';
+import * as ImagePicker from 'expo-image-picker';
+import * as MediaLibrary from 'expo-media-library';
+import * as FileSystem from 'expo-file-system';
+import ViewShot from 'react-native-view-shot';
 
 // Types
-type Screen = 'home' | 'profiles' | 'maths' | 'english' | 'science' | 'activities' | 'parent' | 'calm' | 'shop' | 'stats';
-type AgeGroup = '5-6' | '7-8' | '9-10' | '11-12';
-type Difficulty = 'easy' | 'medium' | 'hard';
-type MathsOperation = 'addition' | 'subtraction' | 'multiplication' | 'division' | 'mixed';
-type EnglishType = 'spelling' | 'phonics' | 'vocabulary' | 'grammar';
-type ScienceType = 'animals' | 'plants' | 'body' | 'space' | 'materials';
+type Screen = 'home' | 'breathe' | 'ground' | 'words' | 'games' | 'contacts' | 'tipp' | 'journal' | 'draw' | 'anchors' | 'safety' | 'pause' | 'shred' | 'sos' | 'wins';
+type BreathType = 'box' | '478' | 'calm';
+type ChatMessage = { role: 'user' | 'assistant'; content: string };
+type JournalEntry = { id: string; date: string; mood: string; content: string };
+type Mood = '😊' | '😐' | '😔' | '😰' | '😤' | '😴';
+type DrawPath = { path: string; color: string; strokeWidth: number };
+type AnchorImage = { id: string; uri: string; caption: string };
+type SafetyPlan = {
+  warningSigns: string;
+  calmingThings: string;
+  supportPeople: { name: string; phone: string }[];
+  reasonsToLive: string;
+};
+type PauseNote = { id: string; label: string; message: string };
+type Win = { id: string; text: string; date: string };
 
-interface ChildProfile {
-  id: string;
-  name: string;
-  age: number;
-  ageGroup: AgeGroup;
-  avatarType: AvatarType;
-  coins: number;
-  xp: number;
-  level: number;
-  streak: number;
-  lastActiveDate: string;
-  evolutionStage: number; // 1-5
-  mathsStats: { correct: number; total: number; bestStreak: number };
-  englishStats: { correct: number; total: number; bestStreak: number };
-  scienceStats: { correct: number; total: number; bestStreak: number };
-  offScreenMinutes: number;
-  achievements: string[];
-  moodLog: { date: string; mood: string }[];
-  lastMoodCheck: string;
-}
+// Claude API configuration - Add your API key here or use environment variable
+const CLAUDE_API_KEY = ''; // Add your Anthropic API key
 
-interface MoodEntry {
-  date: string;
-  mood: string;
-  note?: string;
-}
+// Dave's system prompt for empathetic responses
+const DAVE_SYSTEM_PROMPT = `You are Dave, a warm, gentle, and supportive mental health companion in a mobile app. Your personality:
 
-interface Activity {
-  id: string;
-  name: string;
-  icon: string;
-  minutes: number;
-  coins: number;
-  verified: boolean;
-  date: string;
-}
+- You're calm, patient, and never judgmental
+- You use simple, reassuring language
+- You're like a supportive friend who really listens
+- You validate feelings without trying to "fix" everything
+- You gently encourage self-care and reaching out for help when needed
+- You use short, digestible responses (2-4 sentences usually)
+- You occasionally use gentle humour when appropriate
+- You remind users they're not alone and this will pass
+- You NEVER give medical advice or diagnose
+- If someone expresses serious crisis/suicidal thoughts, you compassionately encourage them to contact crisis services (Samaritans: 116123)
 
-interface Question {
-  question: string;
-  options: string[];
-  correctIndex: number;
-  explanation?: string;
-}
+Keep responses brief and warm. You're here to listen, not lecture.`;
 
-// Age-appropriate content configuration
-const AGE_CONFIG: Record<AgeGroup, {
-  mathsRange: { min: number; max: number };
-  operations: MathsOperation[];
-  spellingWords: string[];
-  scienceTopics: string[];
-}> = {
-  '5-6': {
-    mathsRange: { min: 1, max: 10 },
-    operations: ['addition', 'subtraction'],
-    spellingWords: ['cat', 'dog', 'sun', 'mum', 'dad', 'red', 'big', 'run', 'the', 'and', 'is', 'it', 'can', 'on', 'at'],
-    scienceTopics: ['animals', 'plants'],
-  },
-  '7-8': {
-    mathsRange: { min: 1, max: 50 },
-    operations: ['addition', 'subtraction', 'multiplication'],
-    spellingWords: ['because', 'friend', 'school', 'house', 'people', 'water', 'about', 'would', 'their', 'could', 'there', 'every', 'different', 'through', 'thought'],
-    scienceTopics: ['animals', 'plants', 'materials'],
-  },
-  '9-10': {
-    mathsRange: { min: 1, max: 100 },
-    operations: ['addition', 'subtraction', 'multiplication', 'division'],
-    spellingWords: ['necessary', 'separate', 'definitely', 'temperature', 'environment', 'government', 'immediately', 'interesting', 'particular', 'experience', 'knowledge', 'beautiful', 'favourite', 'important', 'remember'],
-    scienceTopics: ['animals', 'body', 'materials', 'space'],
-  },
-  '11-12': {
-    mathsRange: { min: 1, max: 1000 },
-    operations: ['addition', 'subtraction', 'multiplication', 'division', 'mixed'],
-    spellingWords: ['accommodate', 'conscience', 'exaggerate', 'guarantee', 'independent', 'maintenance', 'occurrence', 'persistence', 'questionnaire', 'recommendation', 'surveillance', 'thorough', 'unnecessary', 'withdrawal', 'acknowledgement'],
-    scienceTopics: ['body', 'space', 'materials', 'plants'],
-  },
+// Dave's messages based on what you're doing
+const daveMessages = {
+  home: [
+    "Hey. I'm here.",
+    "No rush. Take your time.",
+    "You found me. That's good.",
+    "I'm not going anywhere.",
+    "Whatever you need.",
+  ],
+  breathe: [
+    "Breathe with me.",
+    "Just follow along.",
+    "You're doing great.",
+    "In... and out...",
+    "I've got you.",
+  ],
+  ground: [
+    "Let's come back to now.",
+    "You're safe here.",
+    "One thing at a time.",
+    "Right here, right now.",
+    "I'm here with you.",
+  ],
+  words: [
+    "These are true.",
+    "Read them slowly.",
+    "You matter.",
+    "This will pass.",
+    "You're stronger than you know.",
+  ],
+  games: [
+    "Let's distract that brain.",
+    "Just focus on this.",
+    "No pressure, just play.",
+    "Give your mind a break.",
+    "You deserve a breather.",
+  ],
+  crisis: [
+    "Reaching out is brave.",
+    "You don't have to do this alone.",
+    "Help is there.",
+    "It's okay to ask.",
+    "I'm proud of you.",
+  ],
+  journal: [
+    "Writing helps.",
+    "Let it out.",
+    "Your feelings matter.",
+    "This is your safe space.",
+    "Every entry is progress.",
+  ],
+  draw: [
+    "Express yourself.",
+    "No rules here.",
+    "Let your hand move freely.",
+    "Art is healing.",
+    "Just play.",
+  ],
+  anchors: [
+    "These are your safe places.",
+    "Look at what makes you feel okay.",
+    "Remember these moments.",
+    "You have good things in your life.",
+    "These are your anchors.",
+  ],
+  safety: [
+    "This plan is here for you.",
+    "You prepared this when you were okay.",
+    "Trust your past self.",
+    "Follow the steps you wrote.",
+    "You've got this.",
+  ],
+  pause: [
+    "It's okay to step back.",
+    "You don't owe anyone an explanation.",
+    "Taking space is self-care.",
+    "These messages are ready for you.",
+    "One tap to send.",
+  ],
 };
 
-// Avatar types with evolution stages
-const AVATAR_TYPES = {
-  dino: {
-    name: 'Dino',
-    stages: [
-      { name: 'Egg', emoji: '🥚' },
-      { name: 'Baby Dino', emoji: '🐣' },
-      { name: 'Young Dino', emoji: '🦕' },
-      { name: 'Teen Dino', emoji: '🦖' },
-      { name: 'Super Dino', emoji: '👑🦖' },
-    ],
-  },
-  dragon: {
-    name: 'Dragon',
-    stages: [
-      { name: 'Egg', emoji: '🥚' },
-      { name: 'Spark', emoji: '✨' },
-      { name: 'Baby Dragon', emoji: '🐉' },
-      { name: 'Fire Dragon', emoji: '🔥🐉' },
-      { name: 'Legendary Dragon', emoji: '👑🐉' },
-    ],
-  },
-  robot: {
-    name: 'Robot',
-    stages: [
-      { name: 'Blueprint', emoji: '📋' },
-      { name: 'Parts', emoji: '⚙️' },
-      { name: 'Basic Bot', emoji: '🤖' },
-      { name: 'Smart Bot', emoji: '🦾🤖' },
-      { name: 'Super Bot', emoji: '👑🤖' },
-    ],
-  },
-  alien: {
-    name: 'Alien',
-    stages: [
-      { name: 'Signal', emoji: '📡' },
-      { name: 'UFO', emoji: '🛸' },
-      { name: 'Baby Alien', emoji: '👽' },
-      { name: 'Space Explorer', emoji: '🚀👽' },
-      { name: 'Galaxy Master', emoji: '👑👽' },
-    ],
-  },
-  pirate: {
-    name: 'Pirate',
-    stages: [
-      { name: 'Map', emoji: '🗺️' },
-      { name: 'Sailor', emoji: '⛵' },
-      { name: 'Deck Hand', emoji: '🏴‍☠️' },
-      { name: 'Captain', emoji: '🦜🏴‍☠️' },
-      { name: 'Pirate Legend', emoji: '👑🏴‍☠️' },
-    ],
-  },
-};
-
-type AvatarType = keyof typeof AVATAR_TYPES;
-
-// XP needed for each stage
-const STAGE_XP = [0, 100, 500, 1500, 5000];
-
-// Mood options for check-in
-const MOODS = [
-  { emoji: '😊', label: 'Great', color: '#7CB342' },
-  { emoji: '🙂', label: 'Good', color: '#8BC34A' },
-  { emoji: '😐', label: 'Okay', color: '#FFC107' },
-  { emoji: '😔', label: 'Sad', color: '#9E9E9E' },
-  { emoji: '😤', label: 'Frustrated', color: '#FF7043' },
-  { emoji: '😰', label: 'Worried', color: '#7986CB' },
-  { emoji: '😴', label: 'Tired', color: '#90A4AE' },
+// Default Pause Notes
+const defaultPauseNotes: PauseNote[] = [
+  { id: '1', label: '💼 Work', message: "Hi, I'm not feeling well today and need to take a sick day. I'll be back as soon as I can. Thank you for understanding." },
+  { id: '2', label: '👋 Friend', message: "Hey, I'm really sorry but I need to cancel our plans. I'm not in a good place right now and need some time. Can we reschedule? 💜" },
+  { id: '3', label: '📅 Commitment', message: "Hi, I'm so sorry but something's come up and I won't be able to make it. I apologise for the short notice." },
+  { id: '4', label: '👨‍👩‍👧 Family', message: "I need a bit of space right now. I'm okay, just need some time to myself. I'll reach out when I'm feeling better. Love you." },
 ];
 
-// Achievements
-const ACHIEVEMENTS = [
-  { id: 'first_answer', name: 'First Steps', icon: '👣', description: 'Answer your first question' },
-  { id: 'streak_3', name: 'On a Roll', icon: '🔥', description: '3 correct in a row' },
-  { id: 'streak_10', name: 'Unstoppable', icon: '⚡', description: '10 correct in a row' },
-  { id: 'maths_master', name: 'Maths Star', icon: '🧮', description: '50 maths questions correct' },
-  { id: 'word_wizard', name: 'Word Wizard', icon: '📚', description: '50 English questions correct' },
-  { id: 'science_explorer', name: 'Science Explorer', icon: '🔬', description: '50 science questions correct' },
-  { id: 'outdoor_hero', name: 'Outdoor Hero', icon: '🌳', description: '60 minutes of outdoor play' },
-  { id: 'first_evolution', name: 'Evolved!', icon: '🌟', description: 'Evolve your character for the first time' },
-  { id: 'level_5', name: 'Rising Star', icon: '⭐', description: 'Reach level 5' },
-  { id: 'level_10', name: 'Champion', icon: '🏆', description: 'Reach level 10' },
+// Default Affirmations / Words
+const defaultAffirmations = [
+  "This feeling will pass.",
+  "I've survived hard times before.",
+  "I don't have to have everything figured out.",
+  "It's okay to not be okay.",
+  "I'm doing the best I can.",
+  "This moment is not forever.",
+  "I am allowed to take up space.",
+  "My feelings are valid.",
+  "I don't have to be productive to be worthy.",
+  "Rest is not giving up.",
+  "I am more than my worst moments.",
+  "Tomorrow is a new day.",
+  "I am not a burden.",
+  "Asking for help is strength.",
+  "I deserve kindness, especially from myself.",
+  "I've made it through every bad day so far.",
+  "My brain is lying to me right now.",
+  "This too shall pass.",
+  "I am enough, exactly as I am.",
+  "Feelings are not facts.",
 ];
 
-// Off-screen activities
-const ACTIVITY_TYPES = [
-  { id: 'outdoor', name: 'Played Outside', icon: '🌳', coinsPerMin: 2 },
-  { id: 'reading', name: 'Read a Book', icon: '📖', coinsPerMin: 2 },
-  { id: 'creative', name: 'Arts & Crafts', icon: '🎨', coinsPerMin: 1.5 },
-  { id: 'helping', name: 'Helped at Home', icon: '🏠', coinsPerMin: 1.5 },
-  { id: 'exercise', name: 'Exercise/Sport', icon: '⚽', coinsPerMin: 2 },
-  { id: 'social', name: 'Played with Friends', icon: '👫', coinsPerMin: 1.5 },
+// Default UK Crisis Lines
+const defaultCrisisLines = [
+  { name: 'Samaritans', number: '116123', available: '24/7', description: 'Emotional support for anyone' },
+  { name: 'Crisis Text Line', number: 'Text SHOUT to 85258', available: '24/7', description: 'Text support' },
+  { name: 'Mind Infoline', number: '0300 123 3393', available: 'Mon-Fri 9am-6pm', description: 'Mental health info' },
 ];
-
-// Calm colors for ASD/ADHD friendly design
-const COLORS = {
-  background: '#F8F9FA',
-  card: '#FFFFFF',
-  primary: '#6C63FF',
-  secondary: '#4ECDC4',
-  accent: '#FFE66D',
-  success: '#7CB342',
-  warning: '#FFA726',
-  error: '#EF5350',
-  text: '#2D3436',
-  textLight: '#636E72',
-  border: '#E0E0E0',
-  maths: '#FF6B6B',
-  english: '#4ECDC4',
-  science: '#A29BFE',
-  activities: '#FFEAA7',
-};
-
-// Default profile
-const createDefaultProfile = (name: string, age: number, avatarType: AvatarType = 'dino'): ChildProfile => {
-  const ageGroup: AgeGroup = age <= 6 ? '5-6' : age <= 8 ? '7-8' : age <= 10 ? '9-10' : '11-12';
-  return {
-    id: Date.now().toString(),
-    name,
-    age,
-    ageGroup,
-    avatarType,
-    coins: 0,
-    xp: 0,
-    level: 1,
-    streak: 0,
-    lastActiveDate: new Date().toISOString().split('T')[0],
-    evolutionStage: 1,
-    mathsStats: { correct: 0, total: 0, bestStreak: 0 },
-    englishStats: { correct: 0, total: 0, bestStreak: 0 },
-    scienceStats: { correct: 0, total: 0, bestStreak: 0 },
-    offScreenMinutes: 0,
-    achievements: [],
-    moodLog: [],
-    lastMoodCheck: '',
-  };
-};
-
-// Helper to get avatar emoji for current stage
-const getAvatarEmoji = (profile: ChildProfile): string => {
-  const avatarConfig = AVATAR_TYPES[profile.avatarType];
-  const stageIndex = Math.min(profile.evolutionStage - 1, avatarConfig.stages.length - 1);
-  return avatarConfig.stages[stageIndex]?.emoji || '🥚';
-};
-
-// Helper to get stage name
-const getStageName = (profile: ChildProfile): string => {
-  const avatarConfig = AVATAR_TYPES[profile.avatarType];
-  const stageIndex = Math.min(profile.evolutionStage - 1, avatarConfig.stages.length - 1);
-  return avatarConfig.stages[stageIndex]?.name || 'Egg';
-};
 
 export default function App() {
-  // Core state
-  const [screen, setScreen] = useState<Screen>('profiles');
-  const [profiles, setProfiles] = useState<ChildProfile[]>([]);
-  const [currentProfile, setCurrentProfile] = useState<ChildProfile | null>(null);
-  const [isParentMode, setIsParentMode] = useState(false);
+  const [screen, setScreen] = useState<Screen>('home');
+  const [daveMessage, setDaveMessage] = useState(daveMessages.home[0]);
+  const [breathPhase, setBreathPhase] = useState<'in' | 'hold' | 'out' | 'hold2' | 'ready'>('ready');
+  const [breathCount, setBreathCount] = useState(0);
+  const [breathType, setBreathType] = useState<BreathType>('box');
+  const [groundStep, setGroundStep] = useState(0);
+  const [groundAnswers, setGroundAnswers] = useState<string[]>([]);
+  const [currentAffirmation, setCurrentAffirmation] = useState(0);
+  const [affirmations, setAffirmations] = useState<string[]>(defaultAffirmations);
+  const [showAddWord, setShowAddWord] = useState(false);
+  const [newWord, setNewWord] = useState('');
+  const [personalContacts, setPersonalContacts] = useState<{name: string, number: string}[]>([]);
+  const [crisisLines, setCrisisLines] = useState(defaultCrisisLines);
+  const [showAddContact, setShowAddContact] = useState(false);
+  const [showAddCrisisLine, setShowAddCrisisLine] = useState(false);
+  const [editingCrisisIndex, setEditingCrisisIndex] = useState<number | null>(null);
+  const [newCrisisName, setNewCrisisName] = useState('');
+  const [newCrisisNumber, setNewCrisisNumber] = useState('');
+  const [newCrisisDesc, setNewCrisisDesc] = useState('');
+  const [newCrisisAvailable, setNewCrisisAvailable] = useState('');
+  const [newContactName, setNewContactName] = useState('');
+  const [newContactNumber, setNewContactNumber] = useState('');
+  const [gameScore, setGameScore] = useState(0);
+  const [gameTarget, setGameTarget] = useState({ x: 50, y: 50 });
+  const [tippStep, setTippStep] = useState(-1);
 
-  // Profile creation
-  const [showCreateProfile, setShowCreateProfile] = useState(false);
-  const [newName, setNewName] = useState('');
-  const [newAge, setNewAge] = useState('');
-  const [selectedAvatar, setSelectedAvatar] = useState<AvatarType>('dino');
+  // Chat state
+  const [chatMessages, setChatMessages] = useState<ChatMessage[]>([]);
+  const [chatInput, setChatInput] = useState('');
+  const [chatLoading, setChatLoading] = useState(false);
+  const chatScrollRef = useRef<ScrollView>(null);
 
-  // Mood check-in
-  const [showMoodCheck, setShowMoodCheck] = useState(false);
-  const [selectedMood, setSelectedMood] = useState<string | null>(null);
-  const [moodNote, setMoodNote] = useState('');
+  // Journal state
+  const [journalEntries, setJournalEntries] = useState<JournalEntry[]>([]);
+  const [journalInput, setJournalInput] = useState('');
+  const [selectedMood, setSelectedMood] = useState<Mood | null>(null);
+  const [showJournalHistory, setShowJournalHistory] = useState(false);
 
-  // Quiz state
-  const [currentQuestion, setCurrentQuestion] = useState<Question | null>(null);
-  const [selectedAnswer, setSelectedAnswer] = useState<number | null>(null);
-  const [isAnswered, setIsAnswered] = useState(false);
-  const [sessionCorrect, setSessionCorrect] = useState(0);
-  const [sessionTotal, setSessionTotal] = useState(0);
-  const [currentStreak, setCurrentStreak] = useState(0);
-  const [showExplanation, setShowExplanation] = useState(false);
+  // Drawing state
+  const [paths, setPaths] = useState<DrawPath[]>([]);
+  const [currentPath, setCurrentPath] = useState<string>('');
+  const [drawColor, setDrawColor] = useState('#FF0000');
+  const [strokeWidth, setStrokeWidth] = useState(4);
 
-  // Activity state
-  const [pendingActivities, setPendingActivities] = useState<Activity[]>([]);
-  const [selectedActivityType, setSelectedActivityType] = useState<string | null>(null);
-  const [activityMinutes, setActivityMinutes] = useState('');
+  // Anchors state
+  const [anchors, setAnchors] = useState<AnchorImage[]>([]);
+  const [selectedAnchor, setSelectedAnchor] = useState<AnchorImage | null>(null);
+  const [showAddCaption, setShowAddCaption] = useState(false);
+  const [newAnchorUri, setNewAnchorUri] = useState('');
+  const [newAnchorBase64, setNewAnchorBase64] = useState('');
+  const [newAnchorCaption, setNewAnchorCaption] = useState('');
+  const [failedImages, setFailedImages] = useState<Set<string>>(new Set());
 
-  // UI state
-  const [showAchievement, setShowAchievement] = useState<string | null>(null);
+  // Safety Plan state
+  const [safetyPlan, setSafetyPlan] = useState<SafetyPlan>({
+    warningSigns: '',
+    calmingThings: '',
+    supportPeople: [{ name: '', phone: '' }, { name: '', phone: '' }],
+    reasonsToLive: '',
+  });
 
-  // Animations
-  const bounceAnim = useRef(new Animated.Value(1)).current;
-  const celebrateAnim = useRef(new Animated.Value(0)).current;
+  // Pause Notes state
+  const [pauseNotes, setPauseNotes] = useState<PauseNote[]>(defaultPauseNotes);
+  const [showAddPauseNote, setShowAddPauseNote] = useState(false);
+  const [editingPauseNote, setEditingPauseNote] = useState<PauseNote | null>(null);
+  const [newPauseLabel, setNewPauseLabel] = useState('');
+  const [newPauseMessage, setNewPauseMessage] = useState('');
 
-  // Load data on start
+  // Shred It state
+  const [shredText, setShredText] = useState('');
+  const [isShredding, setIsShredding] = useState(false);
+  const [shredAnim] = useState(new Animated.Value(1));
+
+  // Wins Jar state
+  const [wins, setWins] = useState<Win[]>([]);
+  const [newWin, setNewWin] = useState('');
+  const [showAddWin, setShowAddWin] = useState(false);
+
+  // SOS Mode state
+  const [sosTools] = useState([
+    { id: 'breathe', icon: '🌬️', label: 'Breathe', screen: 'breathe' as Screen },
+    { id: 'ground', icon: '🖐️', label: 'Ground', screen: 'ground' as Screen },
+    { id: 'tipp', icon: '🧊', label: 'TIPP', screen: 'tipp' as Screen },
+  ]);
+
+  // Onboarding state
+  const [hasSeenOnboarding, setHasSeenOnboarding] = useState<boolean | null>(null);
+  const [onboardingStep, setOnboardingStep] = useState(0);
+
+  const daveAnim = useRef(new Animated.Value(1)).current;
+  const breathAnim = useRef(new Animated.Value(1)).current;
+  const drawingRef = useRef<ViewShot>(null);
+  const breathTimerRef = useRef<NodeJS.Timeout | null>(null);
+
+  // Load saved data
   useEffect(() => {
-    loadProfiles();
-    loadPendingActivities();
+    loadOnboardingStatus();
+    loadContacts();
+    loadJournalEntries();
+    loadAffirmations();
+    loadCrisisLines();
+    loadSafetyPlan();
+    loadAnchors();
+    loadPauseNotes();
+    loadWins();
   }, []);
 
-  // Gentle bounce animation for dino
+  // Dave gentle bounce
   useEffect(() => {
     const bounce = Animated.loop(
       Animated.sequence([
-        Animated.timing(bounceAnim, { toValue: 1.08, duration: 1500, useNativeDriver: true }),
-        Animated.timing(bounceAnim, { toValue: 1, duration: 1500, useNativeDriver: true }),
+        Animated.timing(daveAnim, { toValue: 1.05, duration: 2000, useNativeDriver: true }),
+        Animated.timing(daveAnim, { toValue: 1, duration: 2000, useNativeDriver: true }),
       ])
     );
     bounce.start();
     return () => bounce.stop();
   }, []);
 
-  // Data persistence
-  const loadProfiles = async () => {
+  // Update Dave's message when screen changes
+  useEffect(() => {
+    const messages = screen === 'contacts' ? daveMessages.crisis : daveMessages[screen] || daveMessages.home;
+    setDaveMessage(messages[Math.floor(Math.random() * messages.length)]);
+  }, [screen]);
+
+  const loadOnboardingStatus = async () => {
     try {
-      const saved = await AsyncStorage.getItem('learnProfiles');
-      if (saved) {
-        const parsed = JSON.parse(saved);
-        setProfiles(parsed);
-      }
+      const seen = await AsyncStorage.getItem('hasSeenOnboarding');
+      setHasSeenOnboarding(seen === 'true');
     } catch (e) {
-      console.log('Error loading profiles:', e);
+      setHasSeenOnboarding(false);
     }
   };
 
-  const saveProfiles = async (newProfiles: ChildProfile[]) => {
+  const completeOnboarding = async () => {
     try {
-      await AsyncStorage.setItem('learnProfiles', JSON.stringify(newProfiles));
-      setProfiles(newProfiles);
-    } catch (e) {
-      console.log('Error saving profiles:', e);
-    }
-  };
-
-  const loadPendingActivities = async () => {
-    try {
-      const saved = await AsyncStorage.getItem('pendingActivities');
-      if (saved) setPendingActivities(JSON.parse(saved));
+      await AsyncStorage.setItem('hasSeenOnboarding', 'true');
+      setHasSeenOnboarding(true);
     } catch (e) {}
   };
 
-  const savePendingActivities = async (activities: Activity[]) => {
+  const loadContacts = async () => {
     try {
-      await AsyncStorage.setItem('pendingActivities', JSON.stringify(activities));
-      setPendingActivities(activities);
+      const saved = await AsyncStorage.getItem('personalContacts');
+      if (saved) setPersonalContacts(JSON.parse(saved));
     } catch (e) {}
   };
 
-  // Profile management
-  const createProfile = () => {
-    if (!newName.trim() || !newAge.trim()) {
-      Alert.alert('Oops!', 'Please enter a name and age');
-      return;
-    }
-    const age = parseInt(newAge);
-    if (isNaN(age) || age < 4 || age > 14) {
-      Alert.alert('Oops!', 'Please enter an age between 4 and 14');
-      return;
-    }
-    const profile = createDefaultProfile(newName.trim(), age, selectedAvatar);
-    const updated = [...profiles, profile];
-    saveProfiles(updated);
-    setNewName('');
-    setNewAge('');
-    setSelectedAvatar('dino');
-    setShowCreateProfile(false);
-    selectProfile(profile);
+  const loadAffirmations = async () => {
+    try {
+      const saved = await AsyncStorage.getItem('customAffirmations');
+      if (saved) setAffirmations(JSON.parse(saved));
+    } catch (e) {}
+  };
+
+  const addAffirmation = async () => {
+    if (!newWord.trim()) return;
+    const updated = [...affirmations, newWord.trim()];
+    setAffirmations(updated);
+    await AsyncStorage.setItem('customAffirmations', JSON.stringify(updated));
+    setNewWord('');
+    setShowAddWord(false);
+    setCurrentAffirmation(updated.length - 1); // Show the new one
     Vibration.vibrate(100);
   };
 
-  const selectProfile = (profile: ChildProfile) => {
-    // Check for daily streak
-    const today = new Date().toISOString().split('T')[0];
-    const yesterday = new Date(Date.now() - 86400000).toISOString().split('T')[0];
-
-    let updatedProfile = { ...profile };
-
-    if (profile.lastActiveDate === yesterday) {
-      updatedProfile.streak += 1;
-    } else if (profile.lastActiveDate !== today) {
-      updatedProfile.streak = 1;
-    }
-    updatedProfile.lastActiveDate = today;
-
-    setCurrentProfile(updatedProfile);
-    updateProfile(updatedProfile);
-    setScreen('home');
-  };
-
-  const updateProfile = (profile: ChildProfile) => {
-    const updated = profiles.map(p => p.id === profile.id ? profile : p);
-    saveProfiles(updated);
-    setCurrentProfile(profile);
-  };
-
-  const deleteProfile = (profileId: string) => {
-    Alert.alert(
-      'Delete Profile?',
-      'This will remove all progress for this profile.',
-      [
-        { text: 'Cancel', style: 'cancel' },
-        {
-          text: 'Delete',
-          style: 'destructive',
-          onPress: () => {
-            const updated = profiles.filter(p => p.id !== profileId);
-            saveProfiles(updated);
-            if (currentProfile?.id === profileId) {
-              setCurrentProfile(null);
-              setScreen('profiles');
-            }
-          },
-        },
-      ]
-    );
-  };
-
-  // XP and leveling
-  const addXP = (amount: number) => {
-    if (!currentProfile) return;
-
-    const newXP = currentProfile.xp + amount;
-    const newLevel = Math.floor(newXP / 100) + 1;
-
-    // Calculate evolution stage based on XP thresholds
-    let newEvolutionStage = 1;
-    for (let i = STAGE_XP.length - 1; i >= 0; i--) {
-      if (newXP >= STAGE_XP[i]) {
-        newEvolutionStage = i + 1;
-        break;
+  const deleteAffirmation = async (index: number) => {
+    Alert.alert('Remove this word?', affirmations[index], [
+      { text: 'Cancel', style: 'cancel' },
+      {
+        text: 'Remove',
+        style: 'destructive',
+        onPress: async () => {
+          const updated = affirmations.filter((_, i) => i !== index);
+          setAffirmations(updated.length > 0 ? updated : defaultAffirmations);
+          await AsyncStorage.setItem('customAffirmations', JSON.stringify(updated.length > 0 ? updated : defaultAffirmations));
+          setCurrentAffirmation(0);
+        }
       }
-    }
-
-    const updated = {
-      ...currentProfile,
-      xp: newXP,
-      level: newLevel,
-      evolutionStage: Math.max(currentProfile.evolutionStage, newEvolutionStage),
-    };
-
-    // Check for achievements
-    checkAchievements(updated);
-    updateProfile(updated);
+    ]);
   };
 
-  const addCoins = (amount: number) => {
-    if (!currentProfile) return;
-    const updated = { ...currentProfile, coins: currentProfile.coins + amount };
-    updateProfile(updated);
-  };
-
-  const checkAchievements = (profile: ChildProfile) => {
-    const newAchievements: string[] = [];
-
-    if (profile.mathsStats.total === 1 && !profile.achievements.includes('first_answer')) {
-      newAchievements.push('first_answer');
-    }
-    if (profile.mathsStats.bestStreak >= 3 && !profile.achievements.includes('streak_3')) {
-      newAchievements.push('streak_3');
-    }
-    if (profile.mathsStats.bestStreak >= 10 && !profile.achievements.includes('streak_10')) {
-      newAchievements.push('streak_10');
-    }
-    if (profile.mathsStats.correct >= 50 && !profile.achievements.includes('maths_master')) {
-      newAchievements.push('maths_master');
-    }
-    if (profile.englishStats.correct >= 50 && !profile.achievements.includes('word_wizard')) {
-      newAchievements.push('word_wizard');
-    }
-    if (profile.scienceStats.correct >= 50 && !profile.achievements.includes('science_explorer')) {
-      newAchievements.push('science_explorer');
-    }
-    if (profile.offScreenMinutes >= 60 && !profile.achievements.includes('outdoor_hero')) {
-      newAchievements.push('outdoor_hero');
-    }
-    if (profile.evolutionStage >= 2 && !profile.achievements.includes('first_evolution')) {
-      newAchievements.push('first_evolution');
-    }
-    if (profile.level >= 5 && !profile.achievements.includes('level_5')) {
-      newAchievements.push('level_5');
-    }
-    if (profile.level >= 10 && !profile.achievements.includes('level_10')) {
-      newAchievements.push('level_10');
-    }
-
-    if (newAchievements.length > 0) {
-      profile.achievements = [...profile.achievements, ...newAchievements];
-      setShowAchievement(newAchievements[0]);
-      Vibration.vibrate([100, 100, 100]);
-      setTimeout(() => setShowAchievement(null), 3000);
-    }
-  };
-
-  // Question generation
-  const generateMathsQuestion = (): Question => {
-    if (!currentProfile) return { question: '', options: [], correctIndex: 0 };
-
-    const config = AGE_CONFIG[currentProfile.ageGroup];
-    const { min, max } = config.mathsRange;
-    const operations = config.operations;
-    const operation = operations[Math.floor(Math.random() * operations.length)];
-
-    let a: number, b: number, answer: number, questionText: string;
-
-    switch (operation) {
-      case 'addition':
-        a = Math.floor(Math.random() * (max - min + 1)) + min;
-        b = Math.floor(Math.random() * (max - min + 1)) + min;
-        answer = a + b;
-        questionText = `${a} + ${b} = ?`;
-        break;
-      case 'subtraction':
-        a = Math.floor(Math.random() * (max - min + 1)) + min;
-        b = Math.floor(Math.random() * Math.min(a, max - min + 1)) + min;
-        if (b > a) [a, b] = [b, a]; // Ensure positive result for younger kids
-        answer = a - b;
-        questionText = `${a} - ${b} = ?`;
-        break;
-      case 'multiplication':
-        a = Math.floor(Math.random() * 12) + 1;
-        b = Math.floor(Math.random() * 12) + 1;
-        answer = a * b;
-        questionText = `${a} × ${b} = ?`;
-        break;
-      case 'division':
-        b = Math.floor(Math.random() * 12) + 1;
-        answer = Math.floor(Math.random() * 12) + 1;
-        a = b * answer; // Ensure clean division
-        questionText = `${a} ÷ ${b} = ?`;
-        break;
-      default:
-        a = Math.floor(Math.random() * (max - min + 1)) + min;
-        b = Math.floor(Math.random() * (max - min + 1)) + min;
-        answer = a + b;
-        questionText = `${a} + ${b} = ?`;
-    }
-
-    // Generate wrong options
-    const options = [answer];
-    while (options.length < 4) {
-      const wrong = answer + (Math.floor(Math.random() * 10) - 5);
-      if (wrong !== answer && wrong >= 0 && !options.includes(wrong)) {
-        options.push(wrong);
+  const resetAffirmations = async () => {
+    Alert.alert('Reset to defaults?', 'This will remove all your custom words.', [
+      { text: 'Cancel', style: 'cancel' },
+      {
+        text: 'Reset',
+        style: 'destructive',
+        onPress: async () => {
+          setAffirmations(defaultAffirmations);
+          await AsyncStorage.removeItem('customAffirmations');
+          setCurrentAffirmation(0);
+        }
       }
-    }
-
-    // Shuffle options
-    const shuffled = options.sort(() => Math.random() - 0.5);
-    const correctIndex = shuffled.indexOf(answer);
-
-    return {
-      question: questionText,
-      options: shuffled.map(String),
-      correctIndex,
-    };
+    ]);
   };
 
-  const generateEnglishQuestion = (): Question => {
-    if (!currentProfile) return { question: '', options: [], correctIndex: 0 };
+  const loadCrisisLines = async () => {
+    try {
+      const saved = await AsyncStorage.getItem('customCrisisLines');
+      if (saved) setCrisisLines(JSON.parse(saved));
+    } catch (e) {}
+  };
 
-    const config = AGE_CONFIG[currentProfile.ageGroup];
-    const words = config.spellingWords;
-    const word = words[Math.floor(Math.random() * words.length)];
-
-    // Create a misspelled version
-    const misspellings: string[] = [];
-
-    // Common misspelling patterns
-    const patterns = [
-      (w: string) => w.replace(/([aeiou])/i, (match) => match === match.toLowerCase() ? match.toUpperCase() : match.toLowerCase()).toLowerCase(),
-      (w: string) => w.slice(0, -1) + w.slice(-1).repeat(2),
-      (w: string) => w.slice(0, 1) + w.slice(2, 3) + w.slice(1, 2) + w.slice(3),
-      (w: string) => w.replace('e', 'a'),
-      (w: string) => w.replace('i', 'e'),
-      (w: string) => w + 'e',
-    ];
-
-    while (misspellings.length < 3) {
-      const pattern = patterns[Math.floor(Math.random() * patterns.length)];
-      const misspelled = pattern(word);
-      if (misspelled !== word && !misspellings.includes(misspelled)) {
-        misspellings.push(misspelled);
+  const deleteCrisisLine = async (index: number) => {
+    Alert.alert('Remove this helpline?', crisisLines[index].name, [
+      { text: 'Cancel', style: 'cancel' },
+      {
+        text: 'Remove',
+        style: 'destructive',
+        onPress: async () => {
+          const updated = crisisLines.filter((_, i) => i !== index);
+          setCrisisLines(updated);
+          await AsyncStorage.setItem('customCrisisLines', JSON.stringify(updated));
+        }
       }
-    }
-
-    const options = [word, ...misspellings];
-    const shuffled = options.sort(() => Math.random() - 0.5);
-
-    return {
-      question: `Which spelling is correct?`,
-      options: shuffled,
-      correctIndex: shuffled.indexOf(word),
-      explanation: `The correct spelling is "${word}"`,
-    };
+    ]);
   };
 
-  const generateScienceQuestion = (): Question => {
-    if (!currentProfile) return { question: '', options: [], correctIndex: 0 };
-
-    // Science questions by topic
-    const scienceQuestions: Record<string, Question[]> = {
-      animals: [
-        { question: 'What do herbivores eat?', options: ['Plants', 'Meat', 'Fish', 'Insects'], correctIndex: 0, explanation: 'Herbivores only eat plants!' },
-        { question: 'How many legs does a spider have?', options: ['8', '6', '4', '10'], correctIndex: 0, explanation: 'Spiders have 8 legs. Insects have 6!' },
-        { question: 'What is a baby frog called?', options: ['Tadpole', 'Cub', 'Chick', 'Puppy'], correctIndex: 0 },
-        { question: 'Which animal is a mammal?', options: ['Dolphin', 'Shark', 'Salmon', 'Octopus'], correctIndex: 0, explanation: 'Dolphins are mammals - they breathe air and feed milk to their babies!' },
-        { question: 'What do bees make?', options: ['Honey', 'Milk', 'Silk', 'Wool'], correctIndex: 0 },
-      ],
-      plants: [
-        { question: 'What do plants need to grow?', options: ['Water, light & air', 'Just water', 'Just light', 'Just soil'], correctIndex: 0 },
-        { question: 'What part of the plant makes food?', options: ['Leaves', 'Roots', 'Stem', 'Flower'], correctIndex: 0, explanation: 'Leaves use sunlight to make food through photosynthesis!' },
-        { question: 'What do roots do?', options: ['Absorb water', 'Make seeds', 'Attract bees', 'Store light'], correctIndex: 0 },
-        { question: 'What is the process plants use to make food?', options: ['Photosynthesis', 'Digestion', 'Respiration', 'Evaporation'], correctIndex: 0 },
-      ],
-      body: [
-        { question: 'What organ pumps blood around your body?', options: ['Heart', 'Brain', 'Lungs', 'Stomach'], correctIndex: 0 },
-        { question: 'How many bones does an adult have?', options: ['206', '100', '50', '500'], correctIndex: 0 },
-        { question: 'What do your lungs do?', options: ['Help you breathe', 'Digest food', 'Pump blood', 'Think'], correctIndex: 0 },
-        { question: 'Which body part controls your whole body?', options: ['Brain', 'Heart', 'Stomach', 'Muscles'], correctIndex: 0 },
-        { question: 'What are your five senses?', options: ['Sight, hearing, touch, taste, smell', 'Running, jumping, walking, sitting, standing', 'Happy, sad, angry, scared, excited', 'Red, blue, green, yellow, orange'], correctIndex: 0 },
-      ],
-      space: [
-        { question: 'What is the closest star to Earth?', options: ['The Sun', 'The Moon', 'Mars', 'Polaris'], correctIndex: 0 },
-        { question: 'How many planets are in our solar system?', options: ['8', '9', '7', '10'], correctIndex: 0, explanation: 'There are 8 planets. Pluto is now called a dwarf planet!' },
-        { question: 'What planet is known as the Red Planet?', options: ['Mars', 'Venus', 'Jupiter', 'Saturn'], correctIndex: 0 },
-        { question: 'What is the largest planet?', options: ['Jupiter', 'Saturn', 'Earth', 'Neptune'], correctIndex: 0 },
-        { question: 'The Moon orbits around...', options: ['Earth', 'The Sun', 'Mars', 'Jupiter'], correctIndex: 0 },
-      ],
-      materials: [
-        { question: 'Which material is magnetic?', options: ['Iron', 'Wood', 'Plastic', 'Glass'], correctIndex: 0 },
-        { question: 'What happens to water when it freezes?', options: ['It becomes ice', 'It evaporates', 'It disappears', 'It becomes gas'], correctIndex: 0 },
-        { question: 'Which material is transparent?', options: ['Glass', 'Wood', 'Metal', 'Cardboard'], correctIndex: 0, explanation: 'Transparent means you can see through it!' },
-        { question: 'What is ice made of?', options: ['Frozen water', 'Frozen milk', 'Frozen air', 'Frozen sand'], correctIndex: 0 },
-      ],
+  const addCrisisLine = async () => {
+    if (!newCrisisName.trim() || !newCrisisNumber.trim()) return;
+    const newLine = {
+      name: newCrisisName.trim(),
+      number: newCrisisNumber.trim(),
+      available: newCrisisAvailable.trim(),
+      description: newCrisisDesc.trim() || 'Custom helpline',
     };
-
-    const config = AGE_CONFIG[currentProfile.ageGroup];
-    const topic = config.scienceTopics[Math.floor(Math.random() * config.scienceTopics.length)];
-    const questions = scienceQuestions[topic] || scienceQuestions.animals;
-    const question = questions[Math.floor(Math.random() * questions.length)];
-
-    // Shuffle options while tracking correct answer
-    const correctAnswer = question.options[question.correctIndex];
-    const shuffled = [...question.options].sort(() => Math.random() - 0.5);
-
-    return {
-      ...question,
-      options: shuffled,
-      correctIndex: shuffled.indexOf(correctAnswer),
-    };
+    const updated = [...crisisLines, newLine];
+    setCrisisLines(updated);
+    await AsyncStorage.setItem('customCrisisLines', JSON.stringify(updated));
+    clearCrisisForm();
+    Vibration.vibrate(100);
   };
 
-  const startQuestion = (type: 'maths' | 'english' | 'science') => {
-    let question: Question;
-
-    switch (type) {
-      case 'maths':
-        question = generateMathsQuestion();
-        break;
-      case 'english':
-        question = generateEnglishQuestion();
-        break;
-      case 'science':
-        question = generateScienceQuestion();
-        break;
-    }
-
-    setCurrentQuestion(question);
-    setSelectedAnswer(null);
-    setIsAnswered(false);
-    setShowExplanation(false);
+  const editCrisisLine = (index: number) => {
+    const line = crisisLines[index];
+    setNewCrisisName(line.name);
+    setNewCrisisNumber(line.number);
+    setNewCrisisDesc(line.description);
+    setNewCrisisAvailable(line.available);
+    setEditingCrisisIndex(index);
+    setShowAddCrisisLine(true);
   };
 
-  const answerQuestion = (index: number, subject: 'maths' | 'english' | 'science') => {
-    if (isAnswered || !currentQuestion || !currentProfile) return;
+  const saveCrisisLine = async () => {
+    if (!newCrisisName.trim() || !newCrisisNumber.trim()) return;
 
-    setSelectedAnswer(index);
-    setIsAnswered(true);
+    const updatedLine = {
+      name: newCrisisName.trim(),
+      number: newCrisisNumber.trim(),
+      available: newCrisisAvailable.trim(),
+      description: newCrisisDesc.trim() || 'Custom helpline',
+    };
 
-    const isCorrect = index === currentQuestion.correctIndex;
-
-    if (isCorrect) {
-      // Correct answer
-      Vibration.vibrate(100);
-      setSessionCorrect(prev => prev + 1);
-      setCurrentStreak(prev => prev + 1);
-      addXP(10);
-      addCoins(5);
-
-      // Celebrate animation
-      Animated.sequence([
-        Animated.timing(celebrateAnim, { toValue: 1, duration: 300, useNativeDriver: true }),
-        Animated.timing(celebrateAnim, { toValue: 0, duration: 300, useNativeDriver: true }),
-      ]).start();
+    let updated;
+    if (editingCrisisIndex !== null) {
+      // Editing existing
+      updated = [...crisisLines];
+      updated[editingCrisisIndex] = updatedLine;
     } else {
-      // Wrong answer
-      Vibration.vibrate([50, 50, 50]);
-      setCurrentStreak(0);
-      setShowExplanation(true);
+      // Adding new
+      updated = [...crisisLines, updatedLine];
     }
 
-    setSessionTotal(prev => prev + 1);
-
-    // Update stats
-    const statsKey = `${subject}Stats` as 'mathsStats' | 'englishStats' | 'scienceStats';
-    const updated = {
-      ...currentProfile,
-      [statsKey]: {
-        correct: currentProfile[statsKey].correct + (isCorrect ? 1 : 0),
-        total: currentProfile[statsKey].total + 1,
-        bestStreak: Math.max(currentProfile[statsKey].bestStreak, isCorrect ? currentStreak + 1 : 0),
-      },
-    };
-    updateProfile(updated);
-  };
-
-  // Activity management
-  const submitActivity = () => {
-    if (!selectedActivityType || !activityMinutes || !currentProfile) return;
-
-    const minutes = parseInt(activityMinutes);
-    if (isNaN(minutes) || minutes <= 0) {
-      Alert.alert('Oops!', 'Please enter valid minutes');
-      return;
-    }
-
-    const activityType = ACTIVITY_TYPES.find(a => a.id === selectedActivityType);
-    if (!activityType) return;
-
-    const activity: Activity = {
-      id: Date.now().toString(),
-      name: activityType.name,
-      icon: activityType.icon,
-      minutes,
-      coins: Math.round(minutes * activityType.coinsPerMin),
-      verified: false,
-      date: new Date().toISOString(),
-    };
-
-    const updated = [...pendingActivities, activity];
-    savePendingActivities(updated);
-
-    setSelectedActivityType(null);
-    setActivityMinutes('');
-
-    Alert.alert(
-      'Activity Logged!',
-      `Ask a grown-up to verify "${activityType.name}" to earn ${activity.coins} coins!`,
-      [{ text: 'OK' }]
-    );
-  };
-
-  const verifyActivity = (activityId: string) => {
-    const activity = pendingActivities.find(a => a.id === activityId);
-    if (!activity || !currentProfile) return;
-
-    // Add coins and update off-screen minutes
-    const updated = {
-      ...currentProfile,
-      coins: currentProfile.coins + activity.coins,
-      offScreenMinutes: currentProfile.offScreenMinutes + activity.minutes,
-    };
-    updateProfile(updated);
-
-    // Remove from pending
-    const remaining = pendingActivities.filter(a => a.id !== activityId);
-    savePendingActivities(remaining);
-
+    setCrisisLines(updated);
+    await AsyncStorage.setItem('customCrisisLines', JSON.stringify(updated));
+    clearCrisisForm();
     Vibration.vibrate(100);
   };
 
-  const rejectActivity = (activityId: string) => {
-    const remaining = pendingActivities.filter(a => a.id !== activityId);
-    savePendingActivities(remaining);
+  const clearCrisisForm = () => {
+    setNewCrisisName('');
+    setNewCrisisNumber('');
+    setNewCrisisDesc('');
+    setNewCrisisAvailable('');
+    setEditingCrisisIndex(null);
+    setShowAddCrisisLine(false);
   };
 
-  // Navigation helpers
-  const goHome = () => {
-    setScreen('home');
-    setCurrentQuestion(null);
-    setSessionCorrect(0);
-    setSessionTotal(0);
-    setCurrentStreak(0);
+  const resetCrisisLines = async () => {
+    Alert.alert('Reset to defaults?', 'This will restore all default helplines.', [
+      { text: 'Cancel', style: 'cancel' },
+      {
+        text: 'Reset',
+        onPress: async () => {
+          setCrisisLines(defaultCrisisLines);
+          await AsyncStorage.removeItem('customCrisisLines');
+        }
+      }
+    ]);
+  };
+
+  // Safety Plan functions
+  const loadSafetyPlan = async () => {
+    try {
+      const saved = await AsyncStorage.getItem('safetyPlan');
+      if (saved) setSafetyPlan(JSON.parse(saved));
+    } catch (e) {}
+  };
+
+  const saveSafetyPlan = async () => {
+    await AsyncStorage.setItem('safetyPlan', JSON.stringify(safetyPlan));
+    Vibration.vibrate(100);
+    setDaveMessage("Your safety plan is saved. 💜");
+  };
+
+  const updateSafetyPlan = (field: keyof SafetyPlan, value: string) => {
+    setSafetyPlan(prev => ({ ...prev, [field]: value }));
+  };
+
+  const updateSupportPerson = (index: number, field: 'name' | 'phone', value: string) => {
+    setSafetyPlan(prev => {
+      const newPeople = [...prev.supportPeople];
+      newPeople[index] = { ...newPeople[index], [field]: value };
+      return { ...prev, supportPeople: newPeople };
+    });
+  };
+
+  const addSupportPerson = () => {
+    setSafetyPlan(prev => ({
+      ...prev,
+      supportPeople: [...prev.supportPeople, { name: '', phone: '' }]
+    }));
+  };
+
+  // Anchors functions
+  const loadAnchors = async () => {
+    try {
+      const saved = await AsyncStorage.getItem('anchors');
+      if (saved) setAnchors(JSON.parse(saved));
+    } catch (e) {}
+  };
+
+  const pickAnchorImage = async () => {
+    console.log('🟢 pickAnchorImage: Starting...');
+
+    // Request permission first
+    const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
+    console.log('🟢 pickAnchorImage: Permission status =', status);
+
+    if (status !== 'granted') {
+      Alert.alert(
+        'Permission needed',
+        'Dave needs access to your photos to add anchors. Please enable photo access in Settings.',
+        [
+          { text: 'Cancel', style: 'cancel' },
+          { text: 'Open Settings', onPress: () => Linking.openSettings() }
+        ]
+      );
+      return;
+    }
+
+    const result = await ImagePicker.launchImageLibraryAsync({
+      mediaTypes: ['images'],
+      allowsEditing: true,
+      aspect: [4, 3],
+      quality: 0.8,
+      base64: true, // Get base64 directly - more reliable!
+    });
+
+    console.log('🟢 pickAnchorImage: Result canceled =', result.canceled);
+
+    if (!result.canceled && result.assets[0]) {
+      const asset = result.assets[0];
+      console.log('🟢 pickAnchorImage: Asset URI =', asset.uri);
+      console.log('🟢 pickAnchorImage: Has base64 =', !!asset.base64);
+      console.log('🟢 pickAnchorImage: Base64 length =', asset.base64?.length || 0);
+
+      // Store both URI and base64 data
+      setNewAnchorUri(asset.uri);
+      // @ts-ignore - Store base64 for later use
+      setNewAnchorBase64(asset.base64 || '');
+      setShowAddCaption(true);
+    }
+  };
+
+  const saveAnchor = async () => {
+    console.log('🔵 saveAnchor: Starting...');
+    console.log('🔵 Has URI:', !!newAnchorUri);
+    console.log('🔵 Has base64:', !!newAnchorBase64);
+    console.log('🔵 Base64 length:', newAnchorBase64.length);
+
+    if (!newAnchorUri) {
+      console.log('❌ saveAnchor: No newAnchorUri');
+      return;
+    }
+
+    if (!newAnchorBase64) {
+      console.log('❌ saveAnchor: No base64 data - this should not happen');
+      Alert.alert('Error', 'Image data not available. Please try selecting the image again.');
+      return;
+    }
+
+    const id = Date.now().toString();
+
+    try {
+      let finalUri: string;
+
+      // Try to save to file system with fallbacks
+      const baseDir = FileSystem.documentDirectory || FileSystem.cacheDirectory;
+      console.log('🔵 Step 1: Available directory:', baseDir);
+
+      if (baseDir) {
+        // Try to save as a file
+        const fileName = `anchor_${id}.jpg`;
+        const permanentUri = `${baseDir}${fileName}`;
+        console.log('🔵 Step 2: Writing to:', permanentUri);
+
+        try {
+          await FileSystem.writeAsStringAsync(permanentUri, newAnchorBase64, {
+            encoding: FileSystem.EncodingType.Base64,
+          });
+          console.log('🔵 Step 2 complete: File written');
+
+          // Verify the file was written
+          console.log('🔵 Step 3: Verifying written file...');
+          const destInfo = await FileSystem.getInfoAsync(permanentUri);
+          console.log('🔵 Step 3 result:', JSON.stringify(destInfo));
+
+          if (destInfo.exists) {
+            finalUri = permanentUri;
+          } else {
+            console.log('⚠️ File verification failed, using data URI fallback');
+            finalUri = `data:image/jpeg;base64,${newAnchorBase64}`;
+          }
+        } catch (writeError) {
+          console.log('⚠️ File write failed, using data URI fallback:', writeError);
+          finalUri = `data:image/jpeg;base64,${newAnchorBase64}`;
+        }
+      } else {
+        // No file system directory available - use data URI directly
+        console.log('🔵 No file system available, using data URI');
+        finalUri = `data:image/jpeg;base64,${newAnchorBase64}`;
+      }
+
+      const newAnchor: AnchorImage = {
+        id,
+        uri: finalUri,
+        caption: newAnchorCaption.trim() || 'My anchor',
+      };
+      const updated = [...anchors, newAnchor];
+      setAnchors(updated);
+      await AsyncStorage.setItem('anchors', JSON.stringify(updated));
+
+      // Clear all anchor creation state
+      setNewAnchorUri('');
+      setNewAnchorBase64('');
+      setNewAnchorCaption('');
+      setShowAddCaption(false);
+      Vibration.vibrate(100);
+      console.log('✅ Anchor saved successfully with URI type:', finalUri.startsWith('data:') ? 'data URI' : 'file URI');
+    } catch (e: any) {
+      console.error('❌ Save anchor error:', e);
+      console.error('Error message:', e.message);
+      Alert.alert('Error', `Could not save image: ${e.message || 'Unknown error'}`);
+    }
+  };
+
+  const deleteAnchor = async (id: string) => {
+    Alert.alert('Remove this anchor?', '', [
+      { text: 'Cancel', style: 'cancel' },
+      {
+        text: 'Remove',
+        style: 'destructive',
+        onPress: async () => {
+          // Delete the image file if it's a file URI (not data URI)
+          const anchor = anchors.find(a => a.id === id);
+          if (anchor && !anchor.uri.startsWith('data:')) {
+            const baseDir = FileSystem.documentDirectory || FileSystem.cacheDirectory;
+            if (baseDir && anchor.uri.includes(baseDir)) {
+              try {
+                await FileSystem.deleteAsync(anchor.uri, { idempotent: true });
+              } catch (e) {}
+            }
+          }
+          const updated = anchors.filter(a => a.id !== id);
+          setAnchors(updated);
+          await AsyncStorage.setItem('anchors', JSON.stringify(updated));
+          setSelectedAnchor(null);
+        }
+      }
+    ]);
+  };
+
+  // Pause Notes functions
+  const loadPauseNotes = async () => {
+    try {
+      const saved = await AsyncStorage.getItem('pauseNotes');
+      if (saved) setPauseNotes(JSON.parse(saved));
+    } catch (e) {}
+  };
+
+  const copyPauseNote = async (message: string) => {
+    await Clipboard.setStringAsync(message);
+    Vibration.vibrate(100);
+    setDaveMessage("Copied! Ready to paste. 💜");
+  };
+
+  const sharePauseNote = async (message: string) => {
+    try {
+      await Share.share({ message });
+    } catch (e) {}
+  };
+
+  const editPauseNote = (note: PauseNote) => {
+    setEditingPauseNote(note);
+    setNewPauseLabel(note.label);
+    setNewPauseMessage(note.message);
+    setShowAddPauseNote(true);
+  };
+
+  const savePauseNote = async () => {
+    if (!newPauseLabel.trim() || !newPauseMessage.trim()) return;
+
+    let updated;
+    if (editingPauseNote) {
+      // Editing existing
+      updated = pauseNotes.map(n =>
+        n.id === editingPauseNote.id
+          ? { ...n, label: newPauseLabel.trim(), message: newPauseMessage.trim() }
+          : n
+      );
+    } else {
+      // Adding new
+      const newNote: PauseNote = {
+        id: Date.now().toString(),
+        label: newPauseLabel.trim(),
+        message: newPauseMessage.trim(),
+      };
+      updated = [...pauseNotes, newNote];
+    }
+
+    setPauseNotes(updated);
+    await AsyncStorage.setItem('pauseNotes', JSON.stringify(updated));
+    clearPauseNoteForm();
+    Vibration.vibrate(100);
+  };
+
+  const deletePauseNote = async (id: string) => {
+    Alert.alert('Delete this note?', '', [
+      { text: 'Cancel', style: 'cancel' },
+      {
+        text: 'Delete',
+        style: 'destructive',
+        onPress: async () => {
+          const updated = pauseNotes.filter(n => n.id !== id);
+          setPauseNotes(updated);
+          await AsyncStorage.setItem('pauseNotes', JSON.stringify(updated));
+        }
+      }
+    ]);
+  };
+
+  const clearPauseNoteForm = () => {
+    setNewPauseLabel('');
+    setNewPauseMessage('');
+    setEditingPauseNote(null);
+    setShowAddPauseNote(false);
+  };
+
+  const resetPauseNotes = async () => {
+    Alert.alert('Reset to defaults?', '', [
+      { text: 'Cancel', style: 'cancel' },
+      {
+        text: 'Reset',
+        onPress: async () => {
+          setPauseNotes(defaultPauseNotes);
+          await AsyncStorage.removeItem('pauseNotes');
+        }
+      }
+    ]);
+  };
+
+  // ===== SHRED IT =====
+  const shredIt = () => {
+    if (!shredText.trim()) return;
+
+    setIsShredding(true);
+    Vibration.vibrate([100, 50, 100, 50, 100]);
+
+    Animated.sequence([
+      Animated.timing(shredAnim, { toValue: 0.8, duration: 100, useNativeDriver: true }),
+      Animated.timing(shredAnim, { toValue: 1.1, duration: 100, useNativeDriver: true }),
+      Animated.timing(shredAnim, { toValue: 0, duration: 500, useNativeDriver: true }),
+    ]).start(() => {
+      setShredText('');
+      setIsShredding(false);
+      shredAnim.setValue(1);
+      setDaveMessage("Gone! You don't need to carry that. 💜");
+    });
+  };
+
+  const binIt = () => {
+    if (!shredText.trim()) return;
+
+    setIsShredding(true);
+    Vibration.vibrate(200);
+
+    Animated.timing(shredAnim, { toValue: 0, duration: 400, useNativeDriver: true }).start(() => {
+      setShredText('');
+      setIsShredding(false);
+      shredAnim.setValue(1);
+      setDaveMessage("In the bin! Let it go. 🗑️💜");
+    });
+  };
+
+  // ===== WINS JAR =====
+  const loadWins = async () => {
+    try {
+      const saved = await AsyncStorage.getItem('wins');
+      if (saved) setWins(JSON.parse(saved));
+    } catch (e) {}
+  };
+
+  const addWin = async () => {
+    if (!newWin.trim()) return;
+
+    const win: Win = {
+      id: Date.now().toString(),
+      text: newWin.trim(),
+      date: new Date().toLocaleDateString('en-GB'),
+    };
+
+    const updated = [win, ...wins];
+    setWins(updated);
+    await AsyncStorage.setItem('wins', JSON.stringify(updated));
+    setNewWin('');
+    setShowAddWin(false);
+    Vibration.vibrate(100);
+    setDaveMessage("That's brilliant! You did that! 🌟");
+  };
+
+  const deleteWin = async (id: string) => {
+    Alert.alert('Delete this win?', '', [
+      { text: 'Cancel', style: 'cancel' },
+      {
+        text: 'Delete',
+        style: 'destructive',
+        onPress: async () => {
+          const updated = wins.filter(w => w.id !== id);
+          setWins(updated);
+          await AsyncStorage.setItem('wins', JSON.stringify(updated));
+        }
+      }
+    ]);
+  };
+
+  const loadJournalEntries = async () => {
+    try {
+      const saved = await AsyncStorage.getItem('journalEntries');
+      if (saved) setJournalEntries(JSON.parse(saved));
+    } catch (e) {}
+  };
+
+  const saveJournalEntry = async () => {
+    if (!journalInput.trim() || !selectedMood) {
+      Alert.alert('Missing info', 'Please select a mood and write something.');
+      return;
+    }
+
+    const newEntry: JournalEntry = {
+      id: Date.now().toString(),
+      date: new Date().toISOString(),
+      mood: selectedMood,
+      content: journalInput.trim(),
+    };
+
+    const updated = [newEntry, ...journalEntries];
+    setJournalEntries(updated);
+    await AsyncStorage.setItem('journalEntries', JSON.stringify(updated));
+    setJournalInput('');
+    setSelectedMood(null);
+    Vibration.vibrate(100);
+    setDaveMessage("That's brave. Well done for writing it down. 💜");
+  };
+
+  const deleteJournalEntry = async (id: string) => {
+    Alert.alert('Delete Entry', 'Are you sure?', [
+      { text: 'Cancel', style: 'cancel' },
+      {
+        text: 'Delete',
+        style: 'destructive',
+        onPress: async () => {
+          const updated = journalEntries.filter(e => e.id !== id);
+          setJournalEntries(updated);
+          await AsyncStorage.setItem('journalEntries', JSON.stringify(updated));
+        }
+      }
+    ]);
+  };
+
+  // Claude AI chat function
+  const sendMessageToDave = async () => {
+    if (!chatInput.trim()) return;
+
+    if (!CLAUDE_API_KEY) {
+      Alert.alert(
+        'API Key Needed',
+        'Please add your Anthropic API key in App.tsx to chat with Dave.',
+        [{ text: 'OK' }]
+      );
+      return;
+    }
+
+    const userMessage = chatInput.trim();
+    setChatInput('');
+    setChatMessages(prev => [...prev, { role: 'user', content: userMessage }]);
+    setChatLoading(true);
+
+    try {
+      const response = await fetch('https://api.anthropic.com/v1/messages', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-api-key': CLAUDE_API_KEY,
+          'anthropic-version': '2023-06-01',
+        },
+        body: JSON.stringify({
+          model: 'claude-sonnet-4-20250514',
+          max_tokens: 300,
+          system: DAVE_SYSTEM_PROMPT,
+          messages: [...chatMessages, { role: 'user', content: userMessage }].map(m => ({
+            role: m.role,
+            content: m.content,
+          })),
+        }),
+      });
+
+      const data = await response.json();
+
+      if (data.content && data.content[0]) {
+        setChatMessages(prev => [...prev, { role: 'assistant', content: data.content[0].text }]);
+      } else {
+        throw new Error('No response from Dave');
+      }
+    } catch (error) {
+      console.error('Chat error:', error);
+      setChatMessages(prev => [...prev, {
+        role: 'assistant',
+        content: "Sorry, I couldn't connect just now. But I'm still here with you. Try the breathing or grounding exercises while we sort this out. 💜"
+      }]);
+    } finally {
+      setChatLoading(false);
+      setTimeout(() => chatScrollRef.current?.scrollToEnd({ animated: true }), 100);
+    }
+  };
+
+  const clearChat = () => {
+    Alert.alert('Clear Chat', 'Start fresh?', [
+      { text: 'Cancel', style: 'cancel' },
+      { text: 'Clear', onPress: () => setChatMessages([]) }
+    ]);
+  };
+
+  const saveContact = async () => {
+    if (!newContactName.trim() || !newContactNumber.trim()) return;
+    const updated = [...personalContacts, { name: newContactName, number: newContactNumber }];
+    setPersonalContacts(updated);
+    await AsyncStorage.setItem('personalContacts', JSON.stringify(updated));
+    setNewContactName('');
+    setNewContactNumber('');
+    setShowAddContact(false);
+  };
+
+  const deleteContact = async (index: number) => {
+    Alert.alert('Remove Contact', 'Are you sure?', [
+      { text: 'Cancel', style: 'cancel' },
+      {
+        text: 'Remove',
+        style: 'destructive',
+        onPress: async () => {
+          const updated = personalContacts.filter((_, i) => i !== index);
+          setPersonalContacts(updated);
+          await AsyncStorage.setItem('personalContacts', JSON.stringify(updated));
+        }
+      }
+    ]);
+  };
+
+  const callNumber = (number: string) => {
+    const cleanNumber = number.replace(/[^0-9]/g, '');
+    Linking.openURL(`tel:${cleanNumber}`);
+  };
+
+  const textNumber = (number: string) => {
+    const cleanNumber = number.replace(/[^0-9]/g, '');
+    Linking.openURL(`sms:${cleanNumber}`);
+  };
+
+  // Breathing exercise logic
+  const startBreathing = (type: BreathType) => {
+    setBreathType(type);
+    setBreathCount(0);
+    setBreathPhase('in');
+    runBreathCycle(type, 'in', 0);
+  };
+
+  const stopBreathing = () => {
+    if (breathTimerRef.current) {
+      clearTimeout(breathTimerRef.current);
+    }
+    setBreathPhase('ready');
+    breathAnim.setValue(1);
+  };
+
+  const runBreathCycle = (type: BreathType, phase: string, count: number) => {
+    const timings = {
+      box: { in: 4000, hold: 4000, out: 4000, hold2: 4000 },
+      '478': { in: 4000, hold: 7000, out: 8000, hold2: 0 },
+      calm: { in: 4000, hold: 0, out: 6000, hold2: 0 },
+    };
+
+    const t = timings[type];
+    let nextPhase: typeof breathPhase = 'ready';
+    let duration = 0;
+    let nextCount = count;
+
+    if (phase === 'in') {
+      duration = t.in;
+      nextPhase = t.hold > 0 ? 'hold' : 'out';
+      Animated.timing(breathAnim, { toValue: 1.5, duration, useNativeDriver: true }).start();
+    } else if (phase === 'hold') {
+      duration = t.hold;
+      nextPhase = 'out';
+    } else if (phase === 'out') {
+      duration = t.out;
+      nextPhase = t.hold2 > 0 ? 'hold2' : 'in';
+      Animated.timing(breathAnim, { toValue: 1, duration, useNativeDriver: true }).start();
+      if (t.hold2 === 0) nextCount = count + 1;
+    } else if (phase === 'hold2') {
+      duration = t.hold2;
+      nextPhase = 'in';
+      nextCount = count + 1;
+    }
+
+    if (nextCount >= 5) {
+      stopBreathing();
+      Vibration.vibrate(200);
+      setDaveMessage("Well done. You did 5 breaths. 💜");
+      return;
+    }
+
+    setBreathPhase(nextPhase as typeof breathPhase);
+    setBreathCount(nextCount);
+
+    breathTimerRef.current = setTimeout(() => {
+      runBreathCycle(type, nextPhase, nextCount);
+    }, duration);
+  };
+
+  const breathInstructions = {
+    in: "Breathe in...",
+    hold: "Hold...",
+    out: "Breathe out...",
+    hold2: "Hold...",
+    ready: "Tap to start",
+  };
+
+  // 5-4-3-2-1 Grounding
+  const groundingSteps = [
+    { count: 5, sense: 'SEE', prompt: "Name 5 things you can see right now", icon: '👁️' },
+    { count: 4, sense: 'TOUCH', prompt: "Name 4 things you can touch/feel", icon: '✋' },
+    { count: 3, sense: 'HEAR', prompt: "Name 3 things you can hear", icon: '👂' },
+    { count: 2, sense: 'SMELL', prompt: "Name 2 things you can smell", icon: '👃' },
+    { count: 1, sense: 'TASTE', prompt: "Name 1 thing you can taste", icon: '👅' },
+  ];
+
+  const resetGrounding = () => {
+    setGroundStep(0);
+    setGroundAnswers([]);
+  };
+
+  // TIPP Skills
+  const tippSteps = [
+    {
+      letter: 'T',
+      title: 'Temperature',
+      instruction: "Hold something cold - ice cubes, cold water on your face, or a cold drink. The shock helps reset your nervous system.",
+      icon: '🧊'
+    },
+    {
+      letter: 'I',
+      title: 'Intense Exercise',
+      instruction: "Do something physical for 10-20 minutes - jumping jacks, running on the spot, push-ups. Burns off the adrenaline.",
+      icon: '🏃'
+    },
+    {
+      letter: 'P',
+      title: 'Paced Breathing',
+      instruction: "Breathe out longer than you breathe in. Try breathing in for 4, out for 6. This activates your calming system.",
+      icon: '🌬️'
+    },
+    {
+      letter: 'P',
+      title: 'Paired Muscle Relaxation',
+      instruction: "Tense each muscle group for 5 seconds, then release. Start with your feet, work up to your face. Notice the difference.",
+      icon: '💪'
+    },
+  ];
+
+  // Simple tap game for distraction
+  const moveTarget = () => {
+    setGameTarget({
+      x: Math.random() * 80 + 10,
+      y: Math.random() * 80 + 10,
+    });
+    setGameScore(s => s + 1);
+    Vibration.vibrate(50);
   };
 
   // Render functions
-  const renderProfileSelect = () => (
-    <SafeAreaView style={styles.container}>
-      <View style={styles.header}>
-        <Text style={styles.headerTitle}>Who's Learning Today?</Text>
+  const renderHome = () => (
+    <View style={styles.homeContainer}>
+      <Text style={styles.appTitle}>Dave</Text>
+      <Text style={styles.appSubtitle}>Your Mental Health Companion</Text>
+
+      <Animated.View style={[styles.daveContainer, { transform: [{ scale: daveAnim }] }]}>
+        <Image source={require('./assets/dave.png')} style={styles.daveImage} resizeMode="contain" />
+      </Animated.View>
+
+      <Text style={styles.daveMessage}>{daveMessage}</Text>
+
+      <View style={styles.menuGrid}>
+        <TouchableOpacity style={[styles.menuButton, { backgroundColor: '#E8D5F2' }]} onPress={() => setScreen('breathe')}>
+          <Text style={styles.menuIcon}>🌬️</Text>
+          <Text style={styles.menuText}>Breathe</Text>
+        </TouchableOpacity>
+
+        <TouchableOpacity style={[styles.menuButton, { backgroundColor: '#D5E8F2' }]} onPress={() => setScreen('ground')}>
+          <Text style={styles.menuIcon}>🖐️</Text>
+          <Text style={styles.menuText}>Ground</Text>
+        </TouchableOpacity>
+
+        <TouchableOpacity style={[styles.menuButton, { backgroundColor: '#F2E8D5' }]} onPress={() => setScreen('words')}>
+          <Text style={styles.menuIcon}>💜</Text>
+          <Text style={styles.menuText}>Words</Text>
+        </TouchableOpacity>
+
+        <TouchableOpacity style={[styles.menuButton, { backgroundColor: '#D5F2E8' }]} onPress={() => setScreen('games')}>
+          <Text style={styles.menuIcon}>🎯</Text>
+          <Text style={styles.menuText}>Distract</Text>
+        </TouchableOpacity>
+
+        <TouchableOpacity style={[styles.menuButton, { backgroundColor: '#F2D5E8' }]} onPress={() => setScreen('tipp')}>
+          <Text style={styles.menuIcon}>🧊</Text>
+          <Text style={styles.menuText}>TIPP</Text>
+        </TouchableOpacity>
+
+        <TouchableOpacity style={[styles.menuButton, { backgroundColor: '#FFF5E5' }]} onPress={() => setScreen('journal')}>
+          <Text style={styles.menuIcon}>📝</Text>
+          <Text style={styles.menuText}>Journal</Text>
+        </TouchableOpacity>
+
+        <TouchableOpacity style={[styles.menuButton, { backgroundColor: '#E5FFE5' }]} onPress={() => setScreen('draw')}>
+          <Text style={styles.menuIcon}>🎨</Text>
+          <Text style={styles.menuText}>Draw</Text>
+        </TouchableOpacity>
+
+        <TouchableOpacity style={[styles.menuButton, { backgroundColor: '#E5F0FF' }]} onPress={() => setScreen('anchors')}>
+          <Text style={styles.menuIcon}>🖼️</Text>
+          <Text style={styles.menuText}>Anchors</Text>
+        </TouchableOpacity>
+
+        <TouchableOpacity style={[styles.menuButton, { backgroundColor: '#FFF0E5' }]} onPress={() => setScreen('safety')}>
+          <Text style={styles.menuIcon}>🛡️</Text>
+          <Text style={styles.menuText}>Safety Plan</Text>
+        </TouchableOpacity>
+
+        <TouchableOpacity style={[styles.menuButton, { backgroundColor: '#FFE5E5' }]} onPress={() => setScreen('contacts')}>
+          <Text style={styles.menuIcon}>📞</Text>
+          <Text style={styles.menuText}>Contact</Text>
+        </TouchableOpacity>
+
+        <TouchableOpacity style={[styles.menuButton, { backgroundColor: '#E5E5FF' }]} onPress={() => setScreen('pause')}>
+          <Text style={styles.menuIcon}>⏸️</Text>
+          <Text style={styles.menuText}>Pause</Text>
+        </TouchableOpacity>
+
+        <TouchableOpacity style={[styles.menuButton, { backgroundColor: '#FFE5F0' }]} onPress={() => setScreen('shred')}>
+          <Text style={styles.menuIcon}>📄</Text>
+          <Text style={styles.menuText}>Let Go</Text>
+        </TouchableOpacity>
+
+        <TouchableOpacity style={[styles.menuButton, { backgroundColor: '#FFFDE5' }]} onPress={() => setScreen('wins')}>
+          <Text style={styles.menuIcon}>🏆</Text>
+          <Text style={styles.menuText}>Wins</Text>
+        </TouchableOpacity>
+
+        <TouchableOpacity style={[styles.menuButton, { backgroundColor: '#FFE5E5' }]} onPress={() => setScreen('sos')}>
+          <Text style={styles.menuIcon}>🆘</Text>
+          <Text style={styles.menuText}>SOS</Text>
+        </TouchableOpacity>
+      </View>
+    </View>
+  );
+
+  const renderBreathe = () => (
+    <View style={styles.screenContainer}>
+      <Text style={styles.screenTitle}>Breathe with Dave</Text>
+
+      <Animated.View style={[styles.breathCircle, { transform: [{ scale: breathAnim }] }]}>
+        <Text style={styles.breathText}>{breathInstructions[breathPhase]}</Text>
+        {breathPhase !== 'ready' && <Text style={styles.breathCount}>{breathCount + 1} / 5</Text>}
+      </Animated.View>
+
+      {breathPhase === 'ready' ? (
+        <View style={styles.breathOptions}>
+          <TouchableOpacity style={styles.breathOption} onPress={() => startBreathing('box')}>
+            <Text style={styles.breathOptionTitle}>Box Breathing</Text>
+            <Text style={styles.breathOptionDesc}>4-4-4-4 • Balancing</Text>
+          </TouchableOpacity>
+
+          <TouchableOpacity style={styles.breathOption} onPress={() => startBreathing('478')}>
+            <Text style={styles.breathOptionTitle}>4-7-8 Breathing</Text>
+            <Text style={styles.breathOptionDesc}>Calming • Sleep</Text>
+          </TouchableOpacity>
+
+          <TouchableOpacity style={styles.breathOption} onPress={() => startBreathing('calm')}>
+            <Text style={styles.breathOptionTitle}>Calm Breathing</Text>
+            <Text style={styles.breathOptionDesc}>Simple • Gentle</Text>
+          </TouchableOpacity>
+        </View>
+      ) : (
+        <TouchableOpacity style={styles.stopButton} onPress={stopBreathing}>
+          <Text style={styles.stopButtonText}>Stop</Text>
+        </TouchableOpacity>
+      )}
+
+      <Text style={styles.daveHint}>{daveMessage}</Text>
+    </View>
+  );
+
+  const renderGround = () => (
+    <View style={styles.screenContainer}>
+      <Text style={styles.screenTitle}>5-4-3-2-1 Grounding</Text>
+
+      {groundStep < 5 ? (
+        <View style={styles.groundCard}>
+          <Text style={styles.groundIcon}>{groundingSteps[groundStep].icon}</Text>
+          <Text style={styles.groundCount}>{groundingSteps[groundStep].count}</Text>
+          <Text style={styles.groundSense}>{groundingSteps[groundStep].sense}</Text>
+          <Text style={styles.groundPrompt}>{groundingSteps[groundStep].prompt}</Text>
+
+          <TouchableOpacity
+            style={styles.groundButton}
+            onPress={() => {
+              Vibration.vibrate(100);
+              setGroundStep(s => s + 1);
+            }}
+          >
+            <Text style={styles.groundButtonText}>Done ✓</Text>
+          </TouchableOpacity>
+        </View>
+      ) : (
+        <View style={styles.groundComplete}>
+          <Text style={styles.groundCompleteIcon}>🌟</Text>
+          <Text style={styles.groundCompleteText}>You did it.</Text>
+          <Text style={styles.groundCompleteSubtext}>You're here. You're present. You're okay.</Text>
+          <TouchableOpacity style={styles.groundButton} onPress={resetGrounding}>
+            <Text style={styles.groundButtonText}>Do Again</Text>
+          </TouchableOpacity>
+        </View>
+      )}
+
+      <View style={styles.groundProgress}>
+        {[0,1,2,3,4].map(i => (
+          <View key={i} style={[styles.groundDot, groundStep > i && styles.groundDotFilled]} />
+        ))}
       </View>
 
-      <ScrollView style={styles.content} contentContainerStyle={styles.profilesContainer}>
-        {profiles.map(profile => (
-          <TouchableOpacity
-            key={profile.id}
-            style={styles.profileCard}
-            onPress={() => selectProfile(profile)}
-            onLongPress={() => deleteProfile(profile.id)}
-          >
-            <Text style={styles.profileAvatar}>
-              {getAvatarEmoji(profile)}
-            </Text>
-            <Text style={styles.profileName}>{profile.name}</Text>
-            <Text style={styles.profileAge}>Age {profile.age}</Text>
-            <View style={styles.profileStats}>
-              <Text style={styles.profileStatText}>⭐ Level {profile.level}</Text>
-              <Text style={styles.profileStatText}>🔥 {profile.streak} day streak</Text>
-            </View>
-          </TouchableOpacity>
-        ))}
+      <Text style={styles.daveHint}>{daveMessage}</Text>
+    </View>
+  );
+
+  const renderWords = () => (
+    <View style={styles.screenContainer}>
+      <View style={styles.wordsHeader}>
+        <Text style={styles.screenTitle}>Words for You</Text>
+        <TouchableOpacity onPress={resetAffirmations}>
+          <Text style={styles.resetWordsText}>Reset</Text>
+        </TouchableOpacity>
+      </View>
+
+      <View style={styles.affirmationCard}>
+        <Text style={styles.affirmationText}>{affirmations[currentAffirmation]}</Text>
+        <Text style={styles.affirmationCount}>{currentAffirmation + 1} / {affirmations.length}</Text>
+      </View>
+
+      <View style={styles.affirmationNav}>
+        <TouchableOpacity
+          style={styles.affirmationButton}
+          onPress={() => setCurrentAffirmation(c => c === 0 ? affirmations.length - 1 : c - 1)}
+        >
+          <Text style={styles.affirmationButtonText}>← Previous</Text>
+        </TouchableOpacity>
 
         <TouchableOpacity
-          style={[styles.profileCard, styles.addProfileCard]}
-          onPress={() => setShowCreateProfile(true)}
+          style={styles.deleteWordButton}
+          onPress={() => deleteAffirmation(currentAffirmation)}
         >
-          <Text style={styles.addProfileIcon}>➕</Text>
-          <Text style={styles.addProfileText}>Add Player</Text>
+          <Text style={styles.deleteWordText}>🗑️</Text>
         </TouchableOpacity>
-      </ScrollView>
 
-      {/* Create Profile Modal */}
-      <Modal visible={showCreateProfile} transparent animationType="slide">
+        <TouchableOpacity
+          style={styles.affirmationButton}
+          onPress={() => setCurrentAffirmation(c => (c + 1) % affirmations.length)}
+        >
+          <Text style={styles.affirmationButtonText}>Next →</Text>
+        </TouchableOpacity>
+      </View>
+
+      <View style={styles.wordActions}>
+        <TouchableOpacity
+          style={styles.randomButton}
+          onPress={() => setCurrentAffirmation(Math.floor(Math.random() * affirmations.length))}
+        >
+          <Text style={styles.randomButtonText}>🎲 Random</Text>
+        </TouchableOpacity>
+
+        <TouchableOpacity
+          style={styles.addWordButton}
+          onPress={() => setShowAddWord(true)}
+        >
+          <Text style={styles.addWordButtonText}>+ Add Your Own</Text>
+        </TouchableOpacity>
+      </View>
+
+      <Text style={styles.daveHint}>{daveMessage}</Text>
+
+      {/* Add Word Modal */}
+      <Modal visible={showAddWord} transparent animationType="slide">
         <View style={styles.modalOverlay}>
           <View style={styles.modalContent}>
-            <Text style={styles.modalTitle}>New Player</Text>
+            <Text style={styles.modalTitle}>Add Your Own Words</Text>
+            <TextInput
+              style={[styles.input, { minHeight: 80 }]}
+              placeholder="Write something that helps you..."
+              value={newWord}
+              onChangeText={setNewWord}
+              multiline
+              placeholderTextColor="#999"
+            />
+            <View style={styles.modalButtons}>
+              <TouchableOpacity style={styles.modalCancel} onPress={() => { setShowAddWord(false); setNewWord(''); }}>
+                <Text style={styles.modalCancelText}>Cancel</Text>
+              </TouchableOpacity>
+              <TouchableOpacity style={styles.modalSave} onPress={addAffirmation}>
+                <Text style={styles.modalSaveText}>Add</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
+    </View>
+  );
 
+  const renderGames = () => (
+    <View style={styles.screenContainer}>
+      <Text style={styles.screenTitle}>Distraction Zone</Text>
+
+      <View style={styles.gameArea}>
+        <Text style={styles.gameScore}>Taps: {gameScore}</Text>
+        <Text style={styles.gameInstruction}>Tap Dave as fast as you can!</Text>
+
+        <View style={styles.gameField}>
+          <TouchableOpacity
+            style={[styles.gameTarget, { left: `${gameTarget.x}%`, top: `${gameTarget.y}%` }]}
+            onPress={moveTarget}
+          >
+            <Image source={require('./assets/dave.png')} style={styles.gameTargetImage} resizeMode="contain" />
+          </TouchableOpacity>
+        </View>
+
+        <TouchableOpacity style={styles.resetGameButton} onPress={() => setGameScore(0)}>
+          <Text style={styles.resetGameText}>Reset Score</Text>
+        </TouchableOpacity>
+      </View>
+
+      <Text style={styles.daveHint}>{daveMessage}</Text>
+    </View>
+  );
+
+  const renderTIPP = () => (
+    <ScrollView style={styles.screenContainer} contentContainerStyle={styles.tippContent}>
+      <Text style={styles.screenTitle}>TIPP Skills</Text>
+      <Text style={styles.tippSubtitle}>For when emotions are really intense</Text>
+
+      {tippSteps.map((step, index) => (
+        <TouchableOpacity
+          key={index}
+          style={[styles.tippCard, tippStep === index && styles.tippCardActive]}
+          onPress={() => setTippStep(tippStep === index ? -1 : index)}
+        >
+          <View style={styles.tippHeader}>
+            <Text style={styles.tippIcon}>{step.icon}</Text>
+            <Text style={styles.tippLetter}>{step.letter}</Text>
+            <Text style={styles.tippTitle}>{step.title}</Text>
+          </View>
+          {tippStep === index && (
+            <Text style={styles.tippInstruction}>{step.instruction}</Text>
+          )}
+        </TouchableOpacity>
+      ))}
+
+      <Text style={styles.daveHint}>{daveMessage}</Text>
+    </ScrollView>
+  );
+
+  const renderContacts = () => (
+    <ScrollView style={styles.screenContainer} contentContainerStyle={styles.contactsContent}>
+      <Text style={styles.screenTitle}>Reach Out</Text>
+
+      {/* Crisis Contacts - Mental health professionals */}
+      <Text style={styles.contactSection}>🆘 My Crisis Contacts</Text>
+      <Text style={styles.contactSubtext}>Mental health crisis team, therapist, counsellor</Text>
+      {personalContacts.map((contact, index) => (
+        <View key={index} style={styles.contactCard}>
+          <View style={styles.contactInfo}>
+            <Text style={styles.contactName}>{contact.name}</Text>
+            <Text style={styles.contactNumber}>{contact.number}</Text>
+          </View>
+          <View style={styles.contactActions}>
+            <TouchableOpacity style={styles.callButton} onPress={() => callNumber(contact.number)}>
+              <Text style={styles.actionIcon}>📞</Text>
+            </TouchableOpacity>
+            <TouchableOpacity style={styles.textButton} onPress={() => textNumber(contact.number)}>
+              <Text style={styles.actionIcon}>💬</Text>
+            </TouchableOpacity>
+            <TouchableOpacity style={styles.deleteButton} onPress={() => deleteContact(index)}>
+              <Text style={styles.actionIcon}>🗑️</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      ))}
+
+      <TouchableOpacity style={styles.addContactButton} onPress={() => setShowAddContact(true)}>
+        <Text style={styles.addContactText}>+ Add a person</Text>
+      </TouchableOpacity>
+
+      {/* Crisis Lines */}
+      <View style={styles.crisisHeader}>
+        <Text style={styles.contactSection}>Helplines (UK)</Text>
+        <TouchableOpacity onPress={resetCrisisLines}>
+          <Text style={styles.resetCrisisText}>Reset</Text>
+        </TouchableOpacity>
+      </View>
+      {crisisLines.map((line, index) => (
+        <View key={index} style={styles.crisisCard}>
+          <TouchableOpacity style={styles.crisisInfo} onPress={() => editCrisisLine(index)}>
+            <Text style={styles.crisisName}>{line.name}</Text>
+            <Text style={styles.crisisDesc}>{line.description}</Text>
+            {line.available ? <Text style={styles.crisisAvailable}>{line.available}</Text> : null}
+          </TouchableOpacity>
+          <View style={styles.crisisActions}>
+            <TouchableOpacity
+              style={styles.crisisEditButton}
+              onPress={() => editCrisisLine(index)}
+            >
+              <Text style={styles.actionIcon}>✏️</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={styles.crisisCallButton}
+              onPress={() => {
+                if (line.number.includes('Text')) {
+                  Linking.openURL('sms:85258&body=SHOUT');
+                } else {
+                  callNumber(line.number);
+                }
+              }}
+            >
+              <Text style={styles.crisisNumber}>{line.number}</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={styles.crisisDeleteButton}
+              onPress={() => deleteCrisisLine(index)}
+            >
+              <Text style={styles.actionIcon}>🗑️</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      ))}
+
+      <TouchableOpacity style={styles.addCrisisButton} onPress={() => setShowAddCrisisLine(true)}>
+        <Text style={styles.addContactText}>+ Add a helpline</Text>
+      </TouchableOpacity>
+
+      <Text style={styles.daveHint}>{daveMessage}</Text>
+
+      {/* Add Contact Modal */}
+      <Modal visible={showAddContact} transparent animationType="slide">
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalContent}>
+            <Text style={styles.modalTitle}>Add a Person</Text>
             <TextInput
               style={styles.input}
               placeholder="Name"
-              value={newName}
-              onChangeText={setNewName}
-              autoCapitalize="words"
+              value={newContactName}
+              onChangeText={setNewContactName}
+              placeholderTextColor="#999"
             />
-
             <TextInput
               style={styles.input}
-              placeholder="Age (4-14)"
-              value={newAge}
-              onChangeText={setNewAge}
-              keyboardType="number-pad"
-              maxLength={2}
+              placeholder="Phone number"
+              value={newContactNumber}
+              onChangeText={setNewContactNumber}
+              keyboardType="phone-pad"
+              placeholderTextColor="#999"
             />
-
-            <Text style={styles.avatarSelectLabel}>Choose your character:</Text>
-            <View style={styles.avatarSelectRow}>
-              {(Object.keys(AVATAR_TYPES) as AvatarType[]).map((type) => (
-                <TouchableOpacity
-                  key={type}
-                  style={[
-                    styles.avatarOption,
-                    selectedAvatar === type && styles.avatarOptionSelected,
-                  ]}
-                  onPress={() => setSelectedAvatar(type)}
-                >
-                  <Text style={styles.avatarOptionEmoji}>
-                    {AVATAR_TYPES[type].stages[2]?.emoji || '🥚'}
-                  </Text>
-                  <Text style={styles.avatarOptionName}>{AVATAR_TYPES[type].name}</Text>
-                </TouchableOpacity>
-              ))}
-            </View>
-
             <View style={styles.modalButtons}>
-              <TouchableOpacity
-                style={[styles.modalButton, styles.cancelButton]}
-                onPress={() => {
-                  setShowCreateProfile(false);
-                  setNewName('');
-                  setNewAge('');
-                  setSelectedAvatar('dino');
-                }}
-              >
-                <Text style={styles.cancelButtonText}>Cancel</Text>
+              <TouchableOpacity style={styles.modalCancel} onPress={() => setShowAddContact(false)}>
+                <Text style={styles.modalCancelText}>Cancel</Text>
               </TouchableOpacity>
-
-              <TouchableOpacity
-                style={[styles.modalButton, styles.confirmButton]}
-                onPress={createProfile}
-              >
-                <Text style={styles.confirmButtonText}>Create</Text>
+              <TouchableOpacity style={styles.modalSave} onPress={saveContact}>
+                <Text style={styles.modalSaveText}>Save</Text>
               </TouchableOpacity>
             </View>
           </View>
         </View>
       </Modal>
-    </SafeAreaView>
+
+      {/* Add/Edit Crisis Line Modal */}
+      <Modal visible={showAddCrisisLine} transparent animationType="slide">
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalContent}>
+            <Text style={styles.modalTitle}>{editingCrisisIndex !== null ? 'Edit Helpline' : 'Add a Helpline'}</Text>
+            <TextInput
+              style={styles.input}
+              placeholder="Name (e.g. Samaritans)"
+              value={newCrisisName}
+              onChangeText={setNewCrisisName}
+              placeholderTextColor="#999"
+            />
+            <TextInput
+              style={styles.input}
+              placeholder="Phone number"
+              value={newCrisisNumber}
+              onChangeText={setNewCrisisNumber}
+              keyboardType="phone-pad"
+              placeholderTextColor="#999"
+            />
+            <TextInput
+              style={styles.input}
+              placeholder="Description (e.g. For anyone)"
+              value={newCrisisDesc}
+              onChangeText={setNewCrisisDesc}
+              placeholderTextColor="#999"
+            />
+            <TextInput
+              style={styles.input}
+              placeholder="Hours (e.g. 24/7)"
+              value={newCrisisAvailable}
+              onChangeText={setNewCrisisAvailable}
+              placeholderTextColor="#999"
+            />
+            <View style={styles.modalButtons}>
+              <TouchableOpacity style={styles.modalCancel} onPress={clearCrisisForm}>
+                <Text style={styles.modalCancelText}>Cancel</Text>
+              </TouchableOpacity>
+              <TouchableOpacity style={styles.modalSave} onPress={saveCrisisLine}>
+                <Text style={styles.modalSaveText}>{editingCrisisIndex !== null ? 'Save' : 'Add'}</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
+    </ScrollView>
   );
 
-  const renderHome = () => {
-    if (!currentProfile) return null;
-
-    const avatarEmoji = getAvatarEmoji(currentProfile);
-    const stageName = getStageName(currentProfile);
-    const nextStageXP = STAGE_XP[currentProfile.evolutionStage] || STAGE_XP[STAGE_XP.length - 1];
-    const xpToNext = Math.max(0, nextStageXP - currentProfile.xp);
-
-    return (
-      <SafeAreaView style={styles.container}>
-        {/* Top Bar */}
-        <View style={styles.topBar}>
-          <TouchableOpacity onPress={() => setScreen('profiles')}>
-            <Text style={styles.backText}>← Switch</Text>
-          </TouchableOpacity>
-          <View style={styles.statsRow}>
-            <Text style={styles.statBadge}>🪙 {currentProfile.coins}</Text>
-            <Text style={styles.statBadge}>⭐ {currentProfile.xp} XP</Text>
-            <Text style={styles.statBadge}>🔥 {currentProfile.streak}</Text>
-          </View>
-        </View>
-
-        {/* Avatar & Greeting */}
-        <View style={styles.avatarSection}>
-          <Animated.Text style={[styles.bigAvatar, { transform: [{ scale: bounceAnim }] }]}>
-            {avatarEmoji}
-          </Animated.Text>
-          <Text style={styles.greeting}>Hey {currentProfile.name}!</Text>
-          <Text style={styles.avatarStatus}>
-            {stageName} • Level {currentProfile.level}
-          </Text>
-          {xpToNext > 0 && currentProfile.evolutionStage < 5 && (
-            <Text style={styles.xpToNext}>{xpToNext} XP to evolve!</Text>
-          )}
-        </View>
-
-        {/* Subject Buttons */}
-        <View style={styles.subjectsGrid}>
-          <TouchableOpacity
-            style={[styles.subjectCard, { backgroundColor: COLORS.maths }]}
-            onPress={() => { setScreen('maths'); startQuestion('maths'); }}
-          >
-            <Text style={styles.subjectIcon}>🧮</Text>
-            <Text style={styles.subjectName}>Maths</Text>
-            <Text style={styles.subjectProgress}>
-              {currentProfile.mathsStats.correct} correct
-            </Text>
-          </TouchableOpacity>
-
-          <TouchableOpacity
-            style={[styles.subjectCard, { backgroundColor: COLORS.english }]}
-            onPress={() => { setScreen('english'); startQuestion('english'); }}
-          >
-            <Text style={styles.subjectIcon}>📚</Text>
-            <Text style={styles.subjectName}>English</Text>
-            <Text style={styles.subjectProgress}>
-              {currentProfile.englishStats.correct} correct
-            </Text>
-          </TouchableOpacity>
-
-          <TouchableOpacity
-            style={[styles.subjectCard, { backgroundColor: COLORS.science }]}
-            onPress={() => { setScreen('science'); startQuestion('science'); }}
-          >
-            <Text style={styles.subjectIcon}>🔬</Text>
-            <Text style={styles.subjectName}>Science</Text>
-            <Text style={styles.subjectProgress}>
-              {currentProfile.scienceStats.correct} correct
-            </Text>
-          </TouchableOpacity>
-
-          <TouchableOpacity
-            style={[styles.subjectCard, { backgroundColor: COLORS.activities }]}
-            onPress={() => setScreen('activities')}
-          >
-            <Text style={styles.subjectIcon}>🌳</Text>
-            <Text style={styles.subjectName}>Activities</Text>
-            <Text style={styles.subjectProgress}>
-              {currentProfile.offScreenMinutes} mins earned
-            </Text>
-          </TouchableOpacity>
-        </View>
-
-        {/* Bottom Buttons */}
-        <View style={styles.bottomButtons}>
-          <TouchableOpacity
-            style={styles.bottomButton}
-            onPress={() => setScreen('calm')}
-          >
-            <Text style={styles.bottomButtonIcon}>🌈</Text>
-            <Text style={styles.bottomButtonText}>Calm</Text>
-          </TouchableOpacity>
-
-          <TouchableOpacity
-            style={styles.bottomButton}
-            onPress={() => setScreen('stats')}
-          >
-            <Text style={styles.bottomButtonIcon}>📊</Text>
-            <Text style={styles.bottomButtonText}>Stats</Text>
-          </TouchableOpacity>
-
-          <TouchableOpacity
-            style={styles.bottomButton}
-            onPress={() => setIsParentMode(true)}
-          >
-            <Text style={styles.bottomButtonIcon}>👨‍👩‍👧</Text>
-            <Text style={styles.bottomButtonText}>Parent</Text>
-          </TouchableOpacity>
-        </View>
-      </SafeAreaView>
-    );
-  };
-
-  const renderQuiz = (subject: 'maths' | 'english' | 'science') => {
-    if (!currentQuestion || !currentProfile) return null;
-
-    const subjectColors = {
-      maths: COLORS.maths,
-      english: COLORS.english,
-      science: COLORS.science,
-    };
-
-    const subjectNames = {
-      maths: 'Maths',
-      english: 'English',
-      science: 'Science',
-    };
-
-    return (
-      <SafeAreaView style={styles.container}>
-        {/* Header */}
-        <View style={styles.quizHeader}>
-          <TouchableOpacity onPress={goHome}>
-            <Text style={styles.backText}>← Back</Text>
-          </TouchableOpacity>
-          <Text style={[styles.quizSubject, { color: subjectColors[subject] }]}>
-            {subjectNames[subject]}
-          </Text>
-          <View style={styles.streakBadge}>
-            <Text style={styles.streakText}>🔥 {currentStreak}</Text>
-          </View>
-        </View>
-
-        {/* Session Stats */}
-        <View style={styles.sessionStats}>
-          <Text style={styles.sessionStatText}>
-            ✓ {sessionCorrect} / {sessionTotal}
-          </Text>
-        </View>
-
-        {/* Question */}
-        <View style={styles.questionContainer}>
-          <Text style={styles.questionText}>{currentQuestion.question}</Text>
-        </View>
-
-        {/* Options */}
-        <View style={styles.optionsContainer}>
-          {currentQuestion.options.map((option, index) => {
-            let optionStyle = styles.optionButton;
-            let textStyle = styles.optionText;
-
-            if (isAnswered) {
-              if (index === currentQuestion.correctIndex) {
-                optionStyle = { ...styles.optionButton, ...styles.correctOption };
-                textStyle = { ...styles.optionText, ...styles.correctOptionText };
-              } else if (index === selectedAnswer) {
-                optionStyle = { ...styles.optionButton, ...styles.wrongOption };
-                textStyle = { ...styles.optionText, ...styles.wrongOptionText };
-              }
-            }
-
-            return (
-              <TouchableOpacity
-                key={index}
-                style={optionStyle}
-                onPress={() => answerQuestion(index, subject)}
-                disabled={isAnswered}
-              >
-                <Text style={textStyle}>{option}</Text>
-              </TouchableOpacity>
-            );
-          })}
-        </View>
-
-        {/* Explanation */}
-        {showExplanation && currentQuestion.explanation && (
-          <View style={styles.explanationBox}>
-            <Text style={styles.explanationText}>{currentQuestion.explanation}</Text>
-          </View>
-        )}
-
-        {/* Next Button */}
-        {isAnswered && (
-          <TouchableOpacity
-            style={[styles.nextButton, { backgroundColor: subjectColors[subject] }]}
-            onPress={() => startQuestion(subject)}
-          >
-            <Text style={styles.nextButtonText}>Next Question →</Text>
+  const renderChat = () => (
+    <KeyboardAvoidingView
+      style={styles.chatContainer}
+      behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+      keyboardVerticalOffset={100}
+    >
+      <View style={styles.chatHeader}>
+        <Text style={styles.screenTitle}>Talk to Dave</Text>
+        {chatMessages.length > 0 && (
+          <TouchableOpacity onPress={clearChat}>
+            <Text style={styles.clearChatText}>Clear</Text>
           </TouchableOpacity>
         )}
-
-        {/* Celebrate Animation */}
-        <Animated.View
-          style={[
-            styles.celebrateOverlay,
-            { opacity: celebrateAnim },
-          ]}
-          pointerEvents="none"
-        >
-          <Text style={styles.celebrateText}>⭐ Great Job! ⭐</Text>
-        </Animated.View>
-      </SafeAreaView>
-    );
-  };
-
-  const renderActivities = () => {
-    if (!currentProfile) return null;
-
-    return (
-      <SafeAreaView style={styles.container}>
-        <View style={styles.header}>
-          <TouchableOpacity onPress={goHome}>
-            <Text style={styles.backText}>← Back</Text>
-          </TouchableOpacity>
-          <Text style={styles.headerTitle}>Off-Screen Activities</Text>
-          <View style={{ width: 50 }} />
-        </View>
-
-        <ScrollView style={styles.content}>
-          <Text style={styles.sectionTitle}>Log an Activity</Text>
-          <Text style={styles.sectionSubtitle}>
-            Earn coins for playing offline! A grown-up needs to verify.
-          </Text>
-
-          <View style={styles.activityTypes}>
-            {ACTIVITY_TYPES.map(activity => (
-              <TouchableOpacity
-                key={activity.id}
-                style={[
-                  styles.activityType,
-                  selectedActivityType === activity.id && styles.activityTypeSelected,
-                ]}
-                onPress={() => setSelectedActivityType(activity.id)}
-              >
-                <Text style={styles.activityTypeIcon}>{activity.icon}</Text>
-                <Text style={styles.activityTypeName}>{activity.name}</Text>
-                <Text style={styles.activityTypeCoins}>
-                  {activity.coinsPerMin} coins/min
-                </Text>
-              </TouchableOpacity>
-            ))}
-          </View>
-
-          {selectedActivityType && (
-            <View style={styles.activityForm}>
-              <Text style={styles.activityFormLabel}>How many minutes?</Text>
-              <TextInput
-                style={styles.minutesInput}
-                value={activityMinutes}
-                onChangeText={setActivityMinutes}
-                keyboardType="number-pad"
-                placeholder="30"
-                maxLength={3}
-              />
-              <TouchableOpacity
-                style={styles.submitActivityButton}
-                onPress={submitActivity}
-              >
-                <Text style={styles.submitActivityText}>Log Activity</Text>
-              </TouchableOpacity>
-            </View>
-          )}
-
-          {pendingActivities.length > 0 && (
-            <View style={styles.pendingSection}>
-              <Text style={styles.sectionTitle}>Waiting for Verification</Text>
-              {pendingActivities.map(activity => (
-                <View key={activity.id} style={styles.pendingActivity}>
-                  <Text style={styles.pendingIcon}>{activity.icon}</Text>
-                  <View style={styles.pendingInfo}>
-                    <Text style={styles.pendingName}>{activity.name}</Text>
-                    <Text style={styles.pendingDetails}>
-                      {activity.minutes} mins • {activity.coins} coins
-                    </Text>
-                  </View>
-                  <Text style={styles.pendingStatus}>⏳</Text>
-                </View>
-              ))}
-              <Text style={styles.pendingHint}>
-                Ask a grown-up to verify in Parent Mode!
-              </Text>
-            </View>
-          )}
-        </ScrollView>
-      </SafeAreaView>
-    );
-  };
-
-  const renderCalm = () => (
-    <SafeAreaView style={styles.container}>
-      <View style={styles.header}>
-        <TouchableOpacity onPress={goHome}>
-          <Text style={styles.backText}>← Back</Text>
-        </TouchableOpacity>
-        <Text style={styles.headerTitle}>Calm Corner</Text>
-        <View style={{ width: 50 }} />
       </View>
 
-      <ScrollView style={styles.content} contentContainerStyle={styles.calmContent}>
-        <Text style={styles.calmTitle}>Need a break?</Text>
-        <Text style={styles.calmSubtitle}>That's okay. Try one of these:</Text>
-
-        <TouchableOpacity style={styles.calmCard}>
-          <Text style={styles.calmCardIcon}>🌬️</Text>
-          <View style={styles.calmCardText}>
-            <Text style={styles.calmCardTitle}>Deep Breaths</Text>
-            <Text style={styles.calmCardDesc}>Breathe in for 4, hold for 4, out for 4</Text>
+      <ScrollView
+        ref={chatScrollRef}
+        style={styles.chatMessages}
+        contentContainerStyle={styles.chatMessagesContent}
+        onContentSizeChange={() => chatScrollRef.current?.scrollToEnd({ animated: true })}
+      >
+        {chatMessages.length === 0 && (
+          <View style={styles.chatWelcome}>
+            <Image source={require('./assets/dave.png')} style={styles.chatDaveImage} resizeMode="contain" />
+            <Text style={styles.chatWelcomeText}>Hey. I'm here to listen.</Text>
+            <Text style={styles.chatWelcomeSubtext}>Whatever's on your mind, I'm not going anywhere.</Text>
           </View>
-        </TouchableOpacity>
+        )}
 
-        <TouchableOpacity style={styles.calmCard}>
-          <Text style={styles.calmCardIcon}>🖐️</Text>
-          <View style={styles.calmCardText}>
-            <Text style={styles.calmCardTitle}>5-4-3-2-1</Text>
-            <Text style={styles.calmCardDesc}>5 things you see, 4 you hear, 3 you feel...</Text>
+        {chatMessages.map((msg, index) => (
+          <View
+            key={index}
+            style={[
+              styles.chatBubble,
+              msg.role === 'user' ? styles.userBubble : styles.daveBubble
+            ]}
+          >
+            <Text style={[
+              styles.chatBubbleText,
+              msg.role === 'user' ? styles.userBubbleText : styles.daveBubbleText
+            ]}>
+              {msg.content}
+            </Text>
           </View>
-        </TouchableOpacity>
+        ))}
 
-        <TouchableOpacity style={styles.calmCard}>
-          <Text style={styles.calmCardIcon}>💪</Text>
-          <View style={styles.calmCardText}>
-            <Text style={styles.calmCardTitle}>Squeeze & Release</Text>
-            <Text style={styles.calmCardDesc}>Squeeze your hands tight, then let go</Text>
+        {chatLoading && (
+          <View style={[styles.chatBubble, styles.daveBubble]}>
+            <ActivityIndicator size="small" color="#9B6BB3" />
           </View>
-        </TouchableOpacity>
-
-        <View style={styles.calmReminder}>
-          <Text style={styles.calmReminderText}>
-            It's okay to take breaks. Learning is easier when you feel calm. 💜
-          </Text>
-        </View>
+        )}
       </ScrollView>
-    </SafeAreaView>
+
+      <View style={styles.chatInputContainer}>
+        <TextInput
+          style={styles.chatInput}
+          placeholder="Type something..."
+          value={chatInput}
+          onChangeText={setChatInput}
+          multiline
+          maxLength={500}
+          placeholderTextColor="#999"
+        />
+        <TouchableOpacity
+          style={[styles.sendButton, !chatInput.trim() && styles.sendButtonDisabled]}
+          onPress={sendMessageToDave}
+          disabled={!chatInput.trim() || chatLoading}
+        >
+          <Text style={styles.sendButtonText}>Send</Text>
+        </TouchableOpacity>
+      </View>
+
+      <Text style={styles.daveHint}>{daveMessage}</Text>
+    </KeyboardAvoidingView>
   );
 
-  const renderStats = () => {
-    if (!currentProfile) return null;
-
-    const achievements = ACHIEVEMENTS.filter(a =>
-      currentProfile.achievements.includes(a.id)
-    );
-    const lockedAchievements = ACHIEVEMENTS.filter(a =>
-      !currentProfile.achievements.includes(a.id)
-    );
-
-    return (
-      <SafeAreaView style={styles.container}>
-        <View style={styles.header}>
-          <TouchableOpacity onPress={goHome}>
-            <Text style={styles.backText}>← Back</Text>
-          </TouchableOpacity>
-          <Text style={styles.headerTitle}>My Progress</Text>
-          <View style={{ width: 50 }} />
-        </View>
-
-        <ScrollView style={styles.content}>
-          {/* Overview */}
-          <View style={styles.statsOverview}>
-            <View style={styles.statItem}>
-              <Text style={styles.statValue}>{currentProfile.level}</Text>
-              <Text style={styles.statLabel}>Level</Text>
-            </View>
-            <View style={styles.statItem}>
-              <Text style={styles.statValue}>{currentProfile.xp}</Text>
-              <Text style={styles.statLabel}>Total XP</Text>
-            </View>
-            <View style={styles.statItem}>
-              <Text style={styles.statValue}>{currentProfile.coins}</Text>
-              <Text style={styles.statLabel}>Coins</Text>
-            </View>
-            <View style={styles.statItem}>
-              <Text style={styles.statValue}>{currentProfile.streak}</Text>
-              <Text style={styles.statLabel}>Day Streak</Text>
-            </View>
-          </View>
-
-          {/* Subject Stats */}
-          <Text style={styles.sectionTitle}>Subject Progress</Text>
-
-          <View style={styles.subjectStat}>
-            <Text style={styles.subjectStatIcon}>🧮</Text>
-            <View style={styles.subjectStatInfo}>
-              <Text style={styles.subjectStatName}>Maths</Text>
-              <Text style={styles.subjectStatDetails}>
-                {currentProfile.mathsStats.correct} / {currentProfile.mathsStats.total} correct
-                {currentProfile.mathsStats.total > 0 &&
-                  ` (${Math.round(currentProfile.mathsStats.correct / currentProfile.mathsStats.total * 100)}%)`
-                }
-              </Text>
-            </View>
-          </View>
-
-          <View style={styles.subjectStat}>
-            <Text style={styles.subjectStatIcon}>📚</Text>
-            <View style={styles.subjectStatInfo}>
-              <Text style={styles.subjectStatName}>English</Text>
-              <Text style={styles.subjectStatDetails}>
-                {currentProfile.englishStats.correct} / {currentProfile.englishStats.total} correct
-                {currentProfile.englishStats.total > 0 &&
-                  ` (${Math.round(currentProfile.englishStats.correct / currentProfile.englishStats.total * 100)}%)`
-                }
-              </Text>
-            </View>
-          </View>
-
-          <View style={styles.subjectStat}>
-            <Text style={styles.subjectStatIcon}>🔬</Text>
-            <View style={styles.subjectStatInfo}>
-              <Text style={styles.subjectStatName}>Science</Text>
-              <Text style={styles.subjectStatDetails}>
-                {currentProfile.scienceStats.correct} / {currentProfile.scienceStats.total} correct
-                {currentProfile.scienceStats.total > 0 &&
-                  ` (${Math.round(currentProfile.scienceStats.correct / currentProfile.scienceStats.total * 100)}%)`
-                }
-              </Text>
-            </View>
-          </View>
-
-          {/* Achievements */}
-          <Text style={styles.sectionTitle}>Achievements</Text>
-
-          <View style={styles.achievementsGrid}>
-            {achievements.map(achievement => (
-              <View key={achievement.id} style={styles.achievement}>
-                <Text style={styles.achievementIcon}>{achievement.icon}</Text>
-                <Text style={styles.achievementName}>{achievement.name}</Text>
-              </View>
-            ))}
-            {lockedAchievements.map(achievement => (
-              <View key={achievement.id} style={[styles.achievement, styles.achievementLocked]}>
-                <Text style={styles.achievementIconLocked}>🔒</Text>
-                <Text style={styles.achievementNameLocked}>{achievement.name}</Text>
-              </View>
-            ))}
-          </View>
-        </ScrollView>
-      </SafeAreaView>
-    );
+  const moods: Mood[] = ['😊', '😐', '😔', '😰', '😤', '😴'];
+  const moodLabels: Record<Mood, string> = {
+    '😊': 'Good',
+    '😐': 'Meh',
+    '😔': 'Sad',
+    '😰': 'Anxious',
+    '😤': 'Frustrated',
+    '😴': 'Tired',
   };
 
-  const renderParentMode = () => {
-    if (!isParentMode) return null;
+  const formatDate = (dateString: string) => {
+    const date = new Date(dateString);
+    return date.toLocaleDateString('en-GB', {
+      day: 'numeric',
+      month: 'short',
+      hour: '2-digit',
+      minute: '2-digit',
+    });
+  };
 
-    return (
-      <Modal visible={isParentMode} animationType="slide">
-        <SafeAreaView style={styles.container}>
-          <View style={styles.header}>
-            <TouchableOpacity onPress={() => setIsParentMode(false)}>
-              <Text style={styles.backText}>← Done</Text>
-            </TouchableOpacity>
-            <Text style={styles.headerTitle}>Parent Mode</Text>
-            <View style={{ width: 50 }} />
+  const renderJournal = () => (
+    <ScrollView style={styles.screenContainer} contentContainerStyle={styles.journalContent}>
+      <View style={styles.journalHeader}>
+        <Text style={styles.screenTitle}>Journal</Text>
+        {journalEntries.length > 0 && (
+          <TouchableOpacity onPress={() => setShowJournalHistory(!showJournalHistory)}>
+            <Text style={styles.historyToggle}>
+              {showJournalHistory ? 'Write' : `History (${journalEntries.length})`}
+            </Text>
+          </TouchableOpacity>
+        )}
+      </View>
+
+      {!showJournalHistory ? (
+        <>
+          <Text style={styles.journalLabel}>How are you feeling?</Text>
+          <View style={styles.moodSelector}>
+            {moods.map(mood => (
+              <TouchableOpacity
+                key={mood}
+                style={[styles.moodButton, selectedMood === mood && styles.moodButtonSelected]}
+                onPress={() => setSelectedMood(mood)}
+              >
+                <Text style={styles.moodEmoji}>{mood}</Text>
+                <Text style={styles.moodLabel}>{moodLabels[mood]}</Text>
+              </TouchableOpacity>
+            ))}
           </View>
 
-          <ScrollView style={styles.content}>
-            {/* Pending Activities */}
-            <Text style={styles.sectionTitle}>Activities to Verify</Text>
+          <Text style={styles.journalLabel}>What's on your mind?</Text>
+          <TextInput
+            style={styles.journalInput}
+            placeholder="Write freely... no one else will see this."
+            value={journalInput}
+            onChangeText={setJournalInput}
+            multiline
+            textAlignVertical="top"
+            placeholderTextColor="#999"
+          />
 
-            {pendingActivities.length === 0 ? (
-              <View style={styles.emptyState}>
-                <Text style={styles.emptyStateText}>No activities waiting</Text>
+          <TouchableOpacity style={styles.saveJournalButton} onPress={saveJournalEntry}>
+            <Text style={styles.saveJournalText}>Save Entry</Text>
+          </TouchableOpacity>
+        </>
+      ) : (
+        <>
+          {journalEntries.length === 0 ? (
+            <Text style={styles.noEntriesText}>No entries yet. Start writing!</Text>
+          ) : (
+            journalEntries.map(entry => (
+              <View key={entry.id} style={styles.journalEntryCard}>
+                <View style={styles.journalEntryHeader}>
+                  <Text style={styles.journalEntryMood}>{entry.mood}</Text>
+                  <Text style={styles.journalEntryDate}>{formatDate(entry.date)}</Text>
+                  <TouchableOpacity onPress={() => deleteJournalEntry(entry.id)}>
+                    <Text style={styles.deleteEntryText}>🗑️</Text>
+                  </TouchableOpacity>
+                </View>
+                <Text style={styles.journalEntryContent}>{entry.content}</Text>
+              </View>
+            ))
+          )}
+        </>
+      )}
+
+      <Text style={styles.daveHint}>{daveMessage}</Text>
+    </ScrollView>
+  );
+
+  const drawColors = ['#FF0000', '#FF6B00', '#FFD700', '#00FF00', '#00CFFF', '#0066FF', '#9D00FF', '#FF00AA', '#000000', '#FFFFFF'];
+
+  const onDrawGesture = (event: PanGestureHandlerGestureEvent) => {
+    const { x, y } = event.nativeEvent;
+    if (currentPath === '') {
+      setCurrentPath(`M${x},${y}`);
+    } else {
+      setCurrentPath(prev => `${prev} L${x},${y}`);
+    }
+  };
+
+  const onDrawEnd = () => {
+    if (currentPath) {
+      setPaths(prev => [...prev, { path: currentPath, color: drawColor, strokeWidth }]);
+      setCurrentPath('');
+    }
+  };
+
+  const clearCanvas = () => {
+    Alert.alert('Clear Drawing', 'Start fresh?', [
+      { text: 'Cancel', style: 'cancel' },
+      { text: 'Clear', onPress: () => setPaths([]) }
+    ]);
+  };
+
+  const saveDrawing = async () => {
+    try {
+      const { status } = await MediaLibrary.requestPermissionsAsync();
+      if (status !== 'granted') {
+        Alert.alert('Permission needed', 'Please allow access to save drawings to your photos.');
+        return;
+      }
+
+      if (drawingRef.current?.capture) {
+        const uri = await drawingRef.current.capture();
+        await MediaLibrary.saveToLibraryAsync(uri);
+        Vibration.vibrate(100);
+        setDaveMessage("Saved to your photos! 🎨💜");
+      }
+    } catch (error) {
+      Alert.alert('Oops', 'Could not save the drawing. Try again?');
+    }
+  };
+
+  const renderDraw = () => (
+    <View style={styles.drawContainer}>
+      <View style={styles.drawHeader}>
+        <Text style={styles.screenTitle}>Draw</Text>
+        <View style={styles.drawHeaderButtons}>
+          <TouchableOpacity onPress={saveDrawing} style={styles.saveDrawButton}>
+            <Text style={styles.saveDrawText}>💾 Save</Text>
+          </TouchableOpacity>
+          <TouchableOpacity onPress={clearCanvas}>
+            <Text style={styles.clearDrawText}>Clear</Text>
+          </TouchableOpacity>
+        </View>
+      </View>
+
+      <View style={styles.colorPicker}>
+        {drawColors.map(color => (
+          <TouchableOpacity
+            key={color}
+            style={[
+              styles.colorButton,
+              { backgroundColor: color },
+              color === '#FFFFFF' && { borderColor: '#DDD', borderWidth: 2 },
+              drawColor === color && styles.colorButtonSelected
+            ]}
+            onPress={() => setDrawColor(color)}
+          />
+        ))}
+      </View>
+
+      <View style={styles.brushSizes}>
+        {[2, 4, 8, 16].map(size => (
+          <TouchableOpacity
+            key={size}
+            style={[styles.brushButton, strokeWidth === size && styles.brushButtonSelected]}
+            onPress={() => setStrokeWidth(size)}
+          >
+            <View style={[styles.brushPreview, { width: size * 2, height: size * 2, backgroundColor: drawColor }]} />
+          </TouchableOpacity>
+        ))}
+      </View>
+
+      <ViewShot ref={drawingRef} options={{ format: 'png', quality: 1 }} style={styles.canvasContainer}>
+        <GestureHandlerRootView style={{ flex: 1 }}>
+          <PanGestureHandler
+            onGestureEvent={onDrawGesture}
+            onEnded={onDrawEnd}
+          >
+            <View style={styles.canvas}>
+              <Svg style={StyleSheet.absoluteFill}>
+                {paths.map((p, index) => (
+                  <Path
+                    key={index}
+                    d={p.path}
+                    stroke={p.color}
+                    strokeWidth={p.strokeWidth}
+                    fill="none"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                  />
+                ))}
+                {currentPath && (
+                  <Path
+                    d={currentPath}
+                    stroke={drawColor}
+                    strokeWidth={strokeWidth}
+                    fill="none"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                  />
+                )}
+              </Svg>
+            </View>
+          </PanGestureHandler>
+        </GestureHandlerRootView>
+      </ViewShot>
+
+      <Text style={styles.daveHint}>{daveMessage}</Text>
+    </View>
+  );
+
+  const renderSafetyPlan = () => (
+    <KeyboardAvoidingView
+      style={styles.screenContainer}
+      behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+      keyboardVerticalOffset={100}
+    >
+    <ScrollView
+      contentContainerStyle={styles.safetyContent}
+      keyboardShouldPersistTaps="handled"
+    >
+      <Image source={require('./assets/dave.png')} style={styles.safetyDave} resizeMode="contain" />
+      <Text style={styles.screenTitle}>My Safety Plan</Text>
+      <Text style={styles.safetySubtitle}>Fill this out when you're feeling okay, so it's ready when you need it</Text>
+
+      <Text style={styles.safetyLabel}>🚨 Warning signs I'm struggling:</Text>
+      <TextInput
+        style={styles.safetyInput}
+        placeholder="e.g., not sleeping, isolating, racing thoughts..."
+        value={safetyPlan.warningSigns}
+        onChangeText={(text) => updateSafetyPlan('warningSigns', text)}
+        multiline
+        placeholderTextColor="#999"
+      />
+
+      <Text style={styles.safetyLabel}>🧘 Things that help me calm down:</Text>
+      <TextInput
+        style={styles.safetyInput}
+        placeholder="e.g., walking, music, hot shower, talking to friend..."
+        value={safetyPlan.calmingThings}
+        onChangeText={(text) => updateSafetyPlan('calmingThings', text)}
+        multiline
+        placeholderTextColor="#999"
+      />
+
+      <Text style={styles.safetyLabel}>💜 My Loved Ones (family, partner, friends):</Text>
+      {safetyPlan.supportPeople.map((person, index) => (
+        <View key={index} style={styles.supportPersonRow}>
+          <TextInput
+            style={[styles.safetyInput, styles.supportNameInput]}
+            placeholder="Name"
+            value={person.name}
+            onChangeText={(text) => updateSupportPerson(index, 'name', text)}
+            placeholderTextColor="#999"
+          />
+          <TextInput
+            style={[styles.safetyInput, styles.supportPhoneInput]}
+            placeholder="Phone"
+            value={person.phone}
+            onChangeText={(text) => updateSupportPerson(index, 'phone', text)}
+            keyboardType="phone-pad"
+            placeholderTextColor="#999"
+          />
+        </View>
+      ))}
+      <TouchableOpacity style={styles.addPersonButton} onPress={addSupportPerson}>
+        <Text style={styles.addPersonText}>+ Add another person</Text>
+      </TouchableOpacity>
+
+      <Text style={styles.safetyLabel}>💜 Reasons to keep going:</Text>
+      <TextInput
+        style={styles.safetyInput}
+        placeholder="e.g., my pet, seeing next season of my show, my friend..."
+        value={safetyPlan.reasonsToLive}
+        onChangeText={(text) => updateSafetyPlan('reasonsToLive', text)}
+        multiline
+        placeholderTextColor="#999"
+      />
+
+      <TouchableOpacity style={styles.saveSafetyButton} onPress={saveSafetyPlan}>
+        <Text style={styles.saveSafetyText}>Save My Safety Plan</Text>
+      </TouchableOpacity>
+
+      <View style={styles.safetyNote}>
+        <Text style={styles.safetyNoteText}>💜 Your plan saves to this device. You can also screenshot it.</Text>
+      </View>
+
+      <Text style={styles.daveHint}>{daveMessage}</Text>
+    </ScrollView>
+    </KeyboardAvoidingView>
+  );
+
+  const renderAnchors = () => (
+    <View style={styles.screenContainer}>
+      <Text style={styles.screenTitle}>My Anchors</Text>
+      <Text style={styles.anchorsSubtitle}>Photos of things that ground you and make you feel better</Text>
+
+      <ScrollView style={styles.anchorsGrid} contentContainerStyle={styles.anchorsGridContent}>
+        {anchors.map((anchor) => (
+          <TouchableOpacity
+            key={anchor.id}
+            style={styles.anchorCard}
+            onPress={() => setSelectedAnchor(anchor)}
+          >
+            {failedImages.has(anchor.id) ? (
+              <View style={[styles.anchorImage, styles.anchorImagePlaceholder]}>
+                <Text style={styles.anchorPlaceholderIcon}>📷</Text>
+                <Text style={styles.anchorPlaceholderText}>Image unavailable</Text>
               </View>
             ) : (
-              pendingActivities.map(activity => (
-                <View key={activity.id} style={styles.verifyCard}>
-                  <View style={styles.verifyInfo}>
-                    <Text style={styles.verifyIcon}>{activity.icon}</Text>
-                    <View>
-                      <Text style={styles.verifyName}>{activity.name}</Text>
-                      <Text style={styles.verifyDetails}>
-                        {activity.minutes} minutes • {activity.coins} coins
-                      </Text>
-                    </View>
-                  </View>
-                  <View style={styles.verifyButtons}>
-                    <TouchableOpacity
-                      style={styles.verifyYes}
-                      onPress={() => verifyActivity(activity.id)}
-                    >
-                      <Text style={styles.verifyYesText}>✓ Yes</Text>
-                    </TouchableOpacity>
-                    <TouchableOpacity
-                      style={styles.verifyNo}
-                      onPress={() => rejectActivity(activity.id)}
-                    >
-                      <Text style={styles.verifyNoText}>✗</Text>
-                    </TouchableOpacity>
-                  </View>
-                </View>
-              ))
+              <Image
+                source={{ uri: anchor.uri }}
+                style={styles.anchorImage}
+                onError={() => setFailedImages(prev => new Set(prev).add(anchor.id))}
+              />
             )}
+            <Text style={styles.anchorCaption} numberOfLines={1}>{anchor.caption}</Text>
+          </TouchableOpacity>
+        ))}
 
-            {/* Quick Stats */}
-            {currentProfile && (
+        <TouchableOpacity style={styles.addAnchorButton} onPress={pickAnchorImage}>
+          <Text style={styles.addAnchorIcon}>+</Text>
+          <Text style={styles.addAnchorText}>Add Photo</Text>
+        </TouchableOpacity>
+      </ScrollView>
+
+      <Text style={styles.daveHint}>{daveMessage}</Text>
+
+      {/* View Anchor Modal */}
+      <Modal visible={selectedAnchor !== null} transparent animationType="fade">
+        <View style={styles.anchorModalOverlay}>
+          <View style={styles.anchorModalContent}>
+            {selectedAnchor && (
               <>
-                <Text style={styles.sectionTitle}>{currentProfile.name}'s Summary</Text>
-                <View style={styles.parentSummary}>
-                  <Text style={styles.parentSummaryItem}>
-                    📊 Level {currentProfile.level} ({currentProfile.xp} XP)
-                  </Text>
-                  <Text style={styles.parentSummaryItem}>
-                    🧮 Maths: {currentProfile.mathsStats.correct} correct
-                  </Text>
-                  <Text style={styles.parentSummaryItem}>
-                    📚 English: {currentProfile.englishStats.correct} correct
-                  </Text>
-                  <Text style={styles.parentSummaryItem}>
-                    🔬 Science: {currentProfile.scienceStats.correct} correct
-                  </Text>
-                  <Text style={styles.parentSummaryItem}>
-                    🌳 Off-screen: {currentProfile.offScreenMinutes} minutes
-                  </Text>
-                  <Text style={styles.parentSummaryItem}>
-                    🔥 {currentProfile.streak} day streak
-                  </Text>
+                {failedImages.has(selectedAnchor.id) ? (
+                  <View style={[styles.anchorModalImage, styles.anchorImagePlaceholder]}>
+                    <Text style={styles.anchorPlaceholderIcon}>📷</Text>
+                    <Text style={styles.anchorPlaceholderText}>Image unavailable</Text>
+                  </View>
+                ) : (
+                  <Image
+                    source={{ uri: selectedAnchor.uri }}
+                    style={styles.anchorModalImage}
+                    resizeMode="contain"
+                    onError={() => setFailedImages(prev => new Set(prev).add(selectedAnchor.id))}
+                  />
+                )}
+                <Text style={styles.anchorModalCaption}>{selectedAnchor.caption}</Text>
+                <View style={styles.anchorModalButtons}>
+                  <TouchableOpacity style={styles.anchorCloseButton} onPress={() => setSelectedAnchor(null)}>
+                    <Text style={styles.anchorCloseText}>Close</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity style={styles.anchorDeleteButton} onPress={() => deleteAnchor(selectedAnchor.id)}>
+                    <Text style={styles.anchorDeleteText}>🗑️ Remove</Text>
+                  </TouchableOpacity>
                 </View>
               </>
             )}
-
-            <Text style={styles.parentTip}>
-              Tip: Let your child log activities, then verify them here. This teaches them that off-screen play is valuable too!
-            </Text>
-          </ScrollView>
-        </SafeAreaView>
+          </View>
+        </View>
       </Modal>
-    );
-  };
 
-  const renderAchievementPopup = () => {
-    if (!showAchievement) return null;
+      {/* Add Caption Modal */}
+      <Modal visible={showAddCaption} transparent animationType="slide">
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalContent}>
+            <Text style={styles.modalTitle}>Add a caption</Text>
+            <Text style={styles.captionHint}>What does this remind you of?</Text>
+            <TextInput
+              style={styles.input}
+              placeholder="e.g., My cat, Beach holiday, Mum's garden..."
+              value={newAnchorCaption}
+              onChangeText={setNewAnchorCaption}
+              placeholderTextColor="#999"
+            />
+            <View style={styles.modalButtons}>
+              <TouchableOpacity style={styles.modalCancel} onPress={() => { setShowAddCaption(false); setNewAnchorUri(''); setNewAnchorCaption(''); }}>
+                <Text style={styles.modalCancelText}>Cancel</Text>
+              </TouchableOpacity>
+              <TouchableOpacity style={styles.modalSave} onPress={saveAnchor}>
+                <Text style={styles.modalSaveText}>Save</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
+    </View>
+  );
 
-    const achievement = ACHIEVEMENTS.find(a => a.id === showAchievement);
-    if (!achievement) return null;
-
-    return (
-      <View style={styles.achievementPopup}>
-        <Text style={styles.achievementPopupIcon}>{achievement.icon}</Text>
-        <Text style={styles.achievementPopupTitle}>Achievement Unlocked!</Text>
-        <Text style={styles.achievementPopupName}>{achievement.name}</Text>
+  const renderPauseNotes = () => (
+    <ScrollView style={styles.screenContainer} contentContainerStyle={styles.pauseContent}>
+      <View style={styles.pauseHeader}>
+        <Text style={styles.screenTitle}>Pause Notes</Text>
+        <TouchableOpacity onPress={resetPauseNotes}>
+          <Text style={styles.resetPauseText}>Reset</Text>
+        </TouchableOpacity>
       </View>
-    );
-  };
+      <Text style={styles.pauseSubtitle}>Pre-written messages ready to send when you need to step back</Text>
 
-  // Main render
+      {pauseNotes.map((note) => (
+        <View key={note.id} style={styles.pauseCard}>
+          <View style={styles.pauseCardHeader}>
+            <Text style={styles.pauseLabel}>{note.label}</Text>
+            <View style={styles.pauseCardActions}>
+              <TouchableOpacity onPress={() => editPauseNote(note)} style={styles.pauseEditBtn}>
+                <Text>✏️</Text>
+              </TouchableOpacity>
+              <TouchableOpacity onPress={() => deletePauseNote(note.id)} style={styles.pauseDeleteBtn}>
+                <Text>🗑️</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+          <Text style={styles.pauseMessage}>{note.message}</Text>
+          <View style={styles.pauseActions}>
+            <TouchableOpacity style={styles.copyButton} onPress={() => copyPauseNote(note.message)}>
+              <Text style={styles.copyButtonText}>📋 Copy</Text>
+            </TouchableOpacity>
+            <TouchableOpacity style={styles.shareButton} onPress={() => sharePauseNote(note.message)}>
+              <Text style={styles.shareButtonText}>📤 Share</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      ))}
+
+      <TouchableOpacity style={styles.addPauseButton} onPress={() => setShowAddPauseNote(true)}>
+        <Text style={styles.addPauseText}>+ Add New Note</Text>
+      </TouchableOpacity>
+
+      <Text style={styles.daveHint}>{daveMessage}</Text>
+
+      {/* Add/Edit Pause Note Modal */}
+      <Modal visible={showAddPauseNote} transparent animationType="slide">
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalContent}>
+            <Text style={styles.modalTitle}>{editingPauseNote ? 'Edit Note' : 'Add New Note'}</Text>
+            <TextInput
+              style={styles.input}
+              placeholder="Label (e.g., 💼 Work, 👋 Friend)"
+              value={newPauseLabel}
+              onChangeText={setNewPauseLabel}
+              placeholderTextColor="#999"
+            />
+            <TextInput
+              style={[styles.input, styles.pauseMessageInput]}
+              placeholder="Your message..."
+              value={newPauseMessage}
+              onChangeText={setNewPauseMessage}
+              multiline
+              placeholderTextColor="#999"
+            />
+            <View style={styles.modalButtons}>
+              <TouchableOpacity style={styles.modalCancel} onPress={clearPauseNoteForm}>
+                <Text style={styles.modalCancelText}>Cancel</Text>
+              </TouchableOpacity>
+              <TouchableOpacity style={styles.modalSave} onPress={savePauseNote}>
+                <Text style={styles.modalSaveText}>{editingPauseNote ? 'Save' : 'Add'}</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
+    </ScrollView>
+  );
+
+  const renderShred = () => (
+    <View style={styles.screenContainer}>
+      <Text style={styles.screenTitle}>Let It Go</Text>
+      <Text style={styles.shredSubtitle}>Write what's bothering you, then release it</Text>
+
+      <Animated.View style={[styles.shredPaper, { transform: [{ scale: shredAnim }], opacity: shredAnim }]}>
+        <TextInput
+          style={styles.shredInput}
+          placeholder="Write it out... no one will see this..."
+          value={shredText}
+          onChangeText={setShredText}
+          multiline
+          placeholderTextColor="#999"
+          editable={!isShredding}
+        />
+      </Animated.View>
+
+      <View style={styles.shredButtons}>
+        <TouchableOpacity
+          style={[styles.shredButton, !shredText.trim() && styles.shredButtonDisabled]}
+          onPress={shredIt}
+          disabled={!shredText.trim() || isShredding}
+        >
+          <Text style={styles.shredButtonIcon}>📄✂️</Text>
+          <Text style={styles.shredButtonText}>Shred It</Text>
+        </TouchableOpacity>
+
+        <TouchableOpacity
+          style={[styles.binButton, !shredText.trim() && styles.shredButtonDisabled]}
+          onPress={binIt}
+          disabled={!shredText.trim() || isShredding}
+        >
+          <Text style={styles.shredButtonIcon}>🗑️</Text>
+          <Text style={styles.binButtonText}>Bin It</Text>
+        </TouchableOpacity>
+      </View>
+
+      <Text style={styles.daveHint}>{daveMessage}</Text>
+    </View>
+  );
+
+  const renderSOS = () => (
+    <View style={styles.sosContainer}>
+      <View style={styles.sosHeader}>
+        <Text style={styles.sosEmoji}>🆘</Text>
+        <Text style={styles.sosTitle}>I Need Help Now</Text>
+        <Text style={styles.sosSubtitle}>You've got this. Pick one:</Text>
+      </View>
+
+      <View style={styles.sosTools}>
+        {sosTools.map(tool => (
+          <TouchableOpacity
+            key={tool.id}
+            style={styles.sosTool}
+            onPress={() => setScreen(tool.screen)}
+          >
+            <Text style={styles.sosToolIcon}>{tool.icon}</Text>
+            <Text style={styles.sosToolLabel}>{tool.label}</Text>
+          </TouchableOpacity>
+        ))}
+      </View>
+
+      <TouchableOpacity
+        style={styles.sosCallButton}
+        onPress={() => Linking.openURL('tel:116123')}
+      >
+        <Text style={styles.sosCallIcon}>📞</Text>
+        <Text style={styles.sosCallText}>Call Samaritans (116 123)</Text>
+      </TouchableOpacity>
+
+      <Text style={styles.sosMessage}>Dave is here. You are not alone. 💜</Text>
+    </View>
+  );
+
+  const renderWins = () => (
+    <ScrollView style={styles.screenContainer} contentContainerStyle={styles.winsContent}>
+      <Text style={styles.screenTitle}>🏆 Wins Jar</Text>
+      <Text style={styles.winsSubtitle}>Celebrate your victories, big and small</Text>
+
+      <TouchableOpacity style={styles.addWinButton} onPress={() => setShowAddWin(true)}>
+        <Text style={styles.addWinText}>+ Add a Win</Text>
+      </TouchableOpacity>
+
+      {wins.length === 0 ? (
+        <View style={styles.emptyWins}>
+          <Text style={styles.emptyWinsIcon}>✨</Text>
+          <Text style={styles.emptyWinsText}>Your wins will appear here</Text>
+          <Text style={styles.emptyWinsHint}>Did you get out of bed? Make tea? That counts!</Text>
+        </View>
+      ) : (
+        wins.map(win => (
+          <View key={win.id} style={styles.winCard}>
+            <View style={styles.winContent}>
+              <Text style={styles.winText}>{win.text}</Text>
+              <Text style={styles.winDate}>{win.date}</Text>
+            </View>
+            <TouchableOpacity onPress={() => deleteWin(win.id)}>
+              <Text style={styles.winDelete}>🗑️</Text>
+            </TouchableOpacity>
+          </View>
+        ))
+      )}
+
+      <Text style={styles.daveHint}>{daveMessage}</Text>
+
+      <Modal visible={showAddWin} transparent animationType="slide">
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalContent}>
+            <Text style={styles.modalTitle}>Add a Win 🌟</Text>
+            <TextInput
+              style={[styles.input, { minHeight: 80 }]}
+              placeholder="What did you achieve? (Even tiny things count!)"
+              value={newWin}
+              onChangeText={setNewWin}
+              multiline
+              placeholderTextColor="#999"
+            />
+            <View style={styles.modalButtons}>
+              <TouchableOpacity style={styles.modalCancel} onPress={() => { setShowAddWin(false); setNewWin(''); }}>
+                <Text style={styles.modalCancelText}>Cancel</Text>
+              </TouchableOpacity>
+              <TouchableOpacity style={styles.modalSave} onPress={addWin}>
+                <Text style={styles.modalSaveText}>Add</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
+    </ScrollView>
+  );
+
+  // Onboarding slides
+  const onboardingSlides = [
+    {
+      title: "Hi, I'm Dave",
+      subtitle: "Your calming companion",
+      description: "I'm here to help you through tough moments. No judgement, just support.",
+      icon: "💜",
+    },
+    {
+      title: "Breathe & Ground",
+      subtitle: "Calm your body",
+      description: "Try box breathing when anxious, or the 5-4-3-2-1 grounding technique to come back to the present.",
+      icon: "🌬️",
+    },
+    {
+      title: "Your Safe Space",
+      subtitle: "Personal tools",
+      description: "Add photos that calm you to Anchors, write in your journal, or use the drawing canvas to express yourself.",
+      icon: "🖼️",
+    },
+    {
+      title: "Crisis Support",
+      subtitle: "Help when you need it",
+      description: "Quick access to crisis lines and your personal contacts. The SOS button is always there for tough moments.",
+      icon: "🆘",
+    },
+    {
+      title: "Ready to Start",
+      subtitle: "Your data stays private",
+      description: "Everything you save stays on your device. Tap below to begin your journey with Dave.",
+      icon: "🔒",
+    },
+  ];
+
+  const renderOnboarding = () => (
+    <View style={styles.onboardingContainer}>
+      <View style={styles.onboardingContent}>
+        <Text style={styles.onboardingIcon}>{onboardingSlides[onboardingStep].icon}</Text>
+        <Image source={require('./assets/dave.png')} style={styles.onboardingDave} />
+        <Text style={styles.onboardingTitle}>{onboardingSlides[onboardingStep].title}</Text>
+        <Text style={styles.onboardingSubtitle}>{onboardingSlides[onboardingStep].subtitle}</Text>
+        <Text style={styles.onboardingDescription}>{onboardingSlides[onboardingStep].description}</Text>
+      </View>
+
+      <View style={styles.onboardingDots}>
+        {onboardingSlides.map((_, index) => (
+          <View
+            key={index}
+            style={[
+              styles.onboardingDot,
+              index === onboardingStep && styles.onboardingDotActive,
+            ]}
+          />
+        ))}
+      </View>
+
+      <View style={styles.onboardingButtons}>
+        {onboardingStep > 0 && (
+          <TouchableOpacity
+            style={styles.onboardingButtonSecondary}
+            onPress={() => setOnboardingStep(onboardingStep - 1)}
+          >
+            <Text style={styles.onboardingButtonSecondaryText}>Back</Text>
+          </TouchableOpacity>
+        )}
+        <TouchableOpacity
+          style={[styles.onboardingButton, onboardingStep === 0 && { flex: 1 }]}
+          onPress={() => {
+            if (onboardingStep < onboardingSlides.length - 1) {
+              setOnboardingStep(onboardingStep + 1);
+            } else {
+              completeOnboarding();
+            }
+          }}
+        >
+          <Text style={styles.onboardingButtonText}>
+            {onboardingStep === onboardingSlides.length - 1 ? "Let's Go" : "Next"}
+          </Text>
+        </TouchableOpacity>
+      </View>
+
+      {onboardingStep === 0 && (
+        <TouchableOpacity onPress={completeOnboarding} style={styles.skipButton}>
+          <Text style={styles.skipText}>Skip intro</Text>
+        </TouchableOpacity>
+      )}
+    </View>
+  );
+
+  // Show loading while checking onboarding status
+  if (hasSeenOnboarding === null) {
+    return (
+      <SafeAreaView style={styles.container}>
+        <View style={styles.loadingContainer}>
+          <Image source={require('./assets/dave.png')} style={styles.loadingDave} />
+        </View>
+      </SafeAreaView>
+    );
+  }
+
+  // Show onboarding for first-time users
+  if (!hasSeenOnboarding) {
+    return (
+      <SafeAreaView style={styles.container}>
+        <StatusBar style="dark" />
+        {renderOnboarding()}
+      </SafeAreaView>
+    );
+  }
+
   return (
-    <GestureHandlerRootView style={{ flex: 1 }}>
+    <SafeAreaView style={styles.container}>
       <StatusBar style="dark" />
 
-      {screen === 'profiles' && renderProfileSelect()}
-      {screen === 'home' && renderHome()}
-      {screen === 'maths' && renderQuiz('maths')}
-      {screen === 'english' && renderQuiz('english')}
-      {screen === 'science' && renderQuiz('science')}
-      {screen === 'activities' && renderActivities()}
-      {screen === 'calm' && renderCalm()}
-      {screen === 'stats' && renderStats()}
+      {screen !== 'home' && (
+        <TouchableOpacity style={styles.backButton} onPress={() => {
+          setScreen('home');
+          stopBreathing();
+          resetGrounding();
+        }}>
+          <Text style={styles.backText}>← Dave</Text>
+        </TouchableOpacity>
+      )}
 
-      {renderParentMode()}
-      {renderAchievementPopup()}
-    </GestureHandlerRootView>
+      {screen === 'home' && renderHome()}
+      {screen === 'breathe' && renderBreathe()}
+      {screen === 'ground' && renderGround()}
+      {screen === 'words' && renderWords()}
+      {screen === 'games' && renderGames()}
+      {screen === 'tipp' && renderTIPP()}
+      {screen === 'journal' && renderJournal()}
+      {screen === 'draw' && renderDraw()}
+      {screen === 'contacts' && renderContacts()}
+      {screen === 'safety' && renderSafetyPlan()}
+      {screen === 'anchors' && renderAnchors()}
+      {screen === 'pause' && renderPauseNotes()}
+      {screen === 'shred' && renderShred()}
+      {screen === 'sos' && renderSOS()}
+      {screen === 'wins' && renderWins()}
+
+      {screen === 'home' && (
+        <View style={styles.footer}>
+          <Text style={styles.footerText}>🔒 Your data stays on your device</Text>
+        </View>
+      )}
+    </SafeAreaView>
   );
 }
 
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: COLORS.background,
+    backgroundColor: '#FAFAFF',
   },
-
-  // Header
-  header: {
-    flexDirection: 'row',
-    alignItems: 'center',
+  // Onboarding styles
+  onboardingContainer: {
+    flex: 1,
+    padding: 24,
     justifyContent: 'space-between',
-    paddingHorizontal: 20,
-    paddingVertical: 15,
-    backgroundColor: COLORS.card,
-    borderBottomWidth: 1,
-    borderBottomColor: COLORS.border,
   },
-  headerTitle: {
+  onboardingContent: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingTop: 40,
+  },
+  onboardingIcon: {
+    fontSize: 50,
+    marginBottom: 10,
+  },
+  onboardingDave: {
+    width: 150,
+    height: 150,
+    marginBottom: 20,
+  },
+  onboardingTitle: {
+    fontSize: 32,
+    fontWeight: 'bold',
+    color: '#5D4E6D',
+    textAlign: 'center',
+    marginBottom: 8,
+  },
+  onboardingSubtitle: {
+    fontSize: 18,
+    color: '#8B5CF6',
+    textAlign: 'center',
+    marginBottom: 16,
+    fontWeight: '500',
+  },
+  onboardingDescription: {
+    fontSize: 16,
+    color: '#6B7280',
+    textAlign: 'center',
+    lineHeight: 24,
+    paddingHorizontal: 20,
+  },
+  onboardingDots: {
+    flexDirection: 'row',
+    justifyContent: 'center',
+    marginBottom: 30,
+  },
+  onboardingDot: {
+    width: 10,
+    height: 10,
+    borderRadius: 5,
+    backgroundColor: '#E0D6EB',
+    marginHorizontal: 5,
+  },
+  onboardingDotActive: {
+    backgroundColor: '#8B5CF6',
+    width: 24,
+  },
+  onboardingButtons: {
+    flexDirection: 'row',
+    gap: 12,
+  },
+  onboardingButton: {
+    flex: 2,
+    backgroundColor: '#8B5CF6',
+    padding: 18,
+    borderRadius: 16,
+    alignItems: 'center',
+  },
+  onboardingButtonText: {
+    color: 'white',
     fontSize: 18,
     fontWeight: '600',
-    color: COLORS.text,
+  },
+  onboardingButtonSecondary: {
+    flex: 1,
+    backgroundColor: '#F3E8FF',
+    padding: 18,
+    borderRadius: 16,
+    alignItems: 'center',
+  },
+  onboardingButtonSecondaryText: {
+    color: '#8B5CF6',
+    fontSize: 18,
+    fontWeight: '600',
+  },
+  skipButton: {
+    alignItems: 'center',
+    marginTop: 20,
+    padding: 10,
+  },
+  skipText: {
+    color: '#9CA3AF',
+    fontSize: 14,
+  },
+  loadingContainer: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  loadingDave: {
+    width: 150,
+    height: 150,
+  },
+  // End onboarding styles
+  backButton: {
+    padding: 20,
+    paddingTop: 12,
   },
   backText: {
-    fontSize: 16,
-    color: COLORS.primary,
+    fontSize: 17,
+    color: '#8B5CF6',
+    fontWeight: '500',
   },
-
-  // Top bar
-  topBar: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingHorizontal: 20,
-    paddingVertical: 12,
-    backgroundColor: COLORS.card,
-    borderBottomWidth: 1,
-    borderBottomColor: COLORS.border,
-  },
-  statsRow: {
-    flexDirection: 'row',
-    gap: 10,
-  },
-  statBadge: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: COLORS.text,
-    backgroundColor: COLORS.background,
-    paddingHorizontal: 10,
-    paddingVertical: 4,
-    borderRadius: 12,
-  },
-
-  // Content
-  content: {
+  homeContainer: {
     flex: 1,
-    padding: 20,
+    alignItems: 'center',
+    padding: 24,
   },
-
-  // Profiles
-  profilesContainer: {
+  appTitle: {
+    fontSize: 36,
+    fontWeight: 'bold',
+    color: '#5D4E6D',
+    textAlign: 'center',
+    marginTop: 10,
+  },
+  appSubtitle: {
+    fontSize: 14,
+    color: '#9B6BB3',
+    textAlign: 'center',
+    marginBottom: 5,
+  },
+  daveContainer: {
+    marginTop: 10,
+    marginBottom: 8,
+  },
+  daveImage: {
+    width: 140,
+    height: 140,
+  },
+  daveMessage: {
+    fontSize: 18,
+    color: '#6B7280',
+    textAlign: 'center',
+    marginBottom: 32,
+    fontWeight: '400',
+    paddingHorizontal: 24,
+    lineHeight: 26,
+  },
+  menuGrid: {
     flexDirection: 'row',
     flexWrap: 'wrap',
     justifyContent: 'center',
-    gap: 15,
-    paddingVertical: 20,
+    gap: 12,
+    width: '100%',
+    paddingHorizontal: 8,
   },
-  profileCard: {
-    width: width * 0.4,
-    backgroundColor: COLORS.card,
-    borderRadius: 20,
+  menuButton: {
+    width: '30%',
+    aspectRatio: 1,
+    borderRadius: 16,
+    justifyContent: 'center',
+    alignItems: 'center',
+    backgroundColor: '#FFFFFF',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 3 },
+    shadowOpacity: 0.15,
+    shadowRadius: 6,
+    elevation: 4,
+    borderWidth: 1,
+    borderColor: '#E5E5E5',
+  },
+  menuIcon: {
+    fontSize: 28,
+    marginBottom: 6,
+  },
+  menuText: {
+    fontSize: 13,
+    fontWeight: '500',
+    color: '#6B7280',
+  },
+  footer: {
     padding: 20,
+    alignItems: 'center',
+  },
+  footerText: {
+    fontSize: 12,
+    color: '#9CA3AF',
+  },
+
+  // Screen container
+  screenContainer: {
+    flex: 1,
+    padding: 24,
+    backgroundColor: '#FAFAFF',
+  },
+  screenTitle: {
+    fontSize: 22,
+    fontWeight: '600',
+    color: '#374151',
+    textAlign: 'center',
+    marginBottom: 24,
+  },
+  daveHint: {
+    fontSize: 15,
+    color: '#8B5CF6',
+    textAlign: 'center',
+    fontWeight: '400',
+    marginTop: 24,
+    paddingHorizontal: 24,
+    lineHeight: 22,
+  },
+
+  // Breathing
+  breathCircle: {
+    width: 180,
+    height: 180,
+    borderRadius: 90,
+    backgroundColor: '#EDE9FE',
+    justifyContent: 'center',
+    alignItems: 'center',
+    alignSelf: 'center',
+    marginVertical: 32,
+    borderWidth: 3,
+    borderColor: '#C4B5FD',
+  },
+  breathText: {
+    fontSize: 18,
+    color: '#6B7280',
+    fontWeight: '500',
+  },
+  breathCount: {
+    fontSize: 13,
+    color: '#8B5CF6',
+    marginTop: 6,
+  },
+  breathOptions: {
+    gap: 12,
+  },
+  breathOption: {
+    backgroundColor: '#FFFFFF',
+    padding: 20,
+    borderRadius: 16,
+    shadowColor: '#8B5CF6',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.06,
+    shadowRadius: 8,
+    elevation: 2,
+    borderWidth: 1,
+    borderColor: '#F3F4F6',
+  },
+  breathOptionTitle: {
+    fontSize: 17,
+    fontWeight: '600',
+    color: '#374151',
+  },
+  breathOptionDesc: {
+    fontSize: 14,
+    color: '#9CA3AF',
+    marginTop: 4,
+  },
+  stopButton: {
+    backgroundColor: '#FEE2E2',
+    padding: 16,
+    borderRadius: 12,
+    alignSelf: 'center',
+    paddingHorizontal: 32,
+  },
+  stopButtonText: {
+    fontSize: 15,
+    color: '#DC2626',
+    fontWeight: '500',
+  },
+
+  // Grounding
+  groundCard: {
+    backgroundColor: '#fff',
+    borderRadius: 20,
+    padding: 30,
     alignItems: 'center',
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.1,
-    shadowRadius: 8,
+    shadowRadius: 4,
     elevation: 3,
   },
-  profileAvatar: {
+  groundIcon: {
     fontSize: 50,
+  },
+  groundCount: {
+    fontSize: 60,
+    fontWeight: 'bold',
+    color: '#9B6BB3',
+  },
+  groundSense: {
+    fontSize: 24,
+    fontWeight: '600',
+    color: '#5D4E6D',
     marginBottom: 10,
   },
-  profileName: {
+  groundPrompt: {
+    fontSize: 16,
+    color: '#666',
+    textAlign: 'center',
+    marginBottom: 20,
+  },
+  groundButton: {
+    backgroundColor: '#9B6BB3',
+    paddingVertical: 15,
+    paddingHorizontal: 40,
+    borderRadius: 25,
+  },
+  groundButtonText: {
+    color: '#fff',
     fontSize: 18,
     fontWeight: '600',
-    color: COLORS.text,
   },
-  profileAge: {
+  groundProgress: {
+    flexDirection: 'row',
+    justifyContent: 'center',
+    gap: 10,
+    marginTop: 30,
+  },
+  groundDot: {
+    width: 12,
+    height: 12,
+    borderRadius: 6,
+    backgroundColor: '#E8D5F2',
+  },
+  groundDotFilled: {
+    backgroundColor: '#9B6BB3',
+  },
+  groundComplete: {
+    alignItems: 'center',
+    padding: 30,
+  },
+  groundCompleteIcon: {
+    fontSize: 60,
+  },
+  groundCompleteText: {
+    fontSize: 28,
+    fontWeight: 'bold',
+    color: '#5D4E6D',
+    marginTop: 20,
+  },
+  groundCompleteSubtext: {
+    fontSize: 16,
+    color: '#666',
+    textAlign: 'center',
+    marginTop: 10,
+    marginBottom: 30,
+  },
+
+  // Affirmations
+  affirmationCard: {
+    backgroundColor: '#fff',
+    borderRadius: 20,
+    padding: 40,
+    marginVertical: 20,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+    elevation: 3,
+    minHeight: 150,
+    justifyContent: 'center',
+  },
+  affirmationText: {
+    fontSize: 22,
+    color: '#5D4E6D',
+    textAlign: 'center',
+    lineHeight: 32,
+  },
+  affirmationNav: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+  },
+  affirmationButton: {
+    padding: 15,
+  },
+  affirmationButtonText: {
+    fontSize: 16,
+    color: '#9B6BB3',
+  },
+  randomButton: {
+    backgroundColor: '#E8D5F2',
+    padding: 15,
+    borderRadius: 25,
+    marginTop: 10,
+  },
+  randomButtonText: {
+    fontSize: 16,
+    color: '#5D4E6D',
+  },
+  wordsHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 24,
+  },
+  resetWordsText: {
+    color: '#9CA3AF',
     fontSize: 14,
-    color: COLORS.textLight,
-    marginBottom: 8,
   },
-  profileStats: {
+  affirmationCount: {
+    fontSize: 12,
+    color: '#9CA3AF',
+    marginTop: 16,
+  },
+  deleteWordButton: {
+    padding: 10,
+  },
+  deleteWordText: {
+    fontSize: 20,
+  },
+  wordActions: {
+    flexDirection: 'row',
+    justifyContent: 'center',
+    gap: 12,
+    marginTop: 10,
+  },
+  addWordButton: {
+    backgroundColor: '#8B5CF6',
+    padding: 15,
+    borderRadius: 25,
+    marginTop: 10,
+  },
+  addWordButtonText: {
+    fontSize: 16,
+    color: '#FFFFFF',
+    fontWeight: '500',
+  },
+
+  // Games
+  gameArea: {
+    flex: 1,
     alignItems: 'center',
   },
-  profileStatText: {
-    fontSize: 12,
-    color: COLORS.textLight,
-  },
-  addProfileCard: {
-    borderWidth: 2,
-    borderColor: COLORS.border,
-    borderStyle: 'dashed',
-    backgroundColor: 'transparent',
-  },
-  addProfileIcon: {
-    fontSize: 40,
+  gameScore: {
+    fontSize: 24,
+    fontWeight: 'bold',
+    color: '#9B6BB3',
     marginBottom: 10,
   },
-  addProfileText: {
+  gameInstruction: {
     fontSize: 16,
-    color: COLORS.textLight,
+    color: '#666',
+    marginBottom: 20,
+  },
+  gameField: {
+    width: '100%',
+    height: 300,
+    backgroundColor: '#F5F0F8',
+    borderRadius: 20,
+    position: 'relative',
+    overflow: 'hidden',
+  },
+  gameTarget: {
+    position: 'absolute',
+    width: 60,
+    height: 60,
+    marginLeft: -30,
+    marginTop: -30,
+  },
+  gameTargetImage: {
+    width: 60,
+    height: 60,
+  },
+  resetGameButton: {
+    marginTop: 20,
+    padding: 15,
+  },
+  resetGameText: {
+    color: '#9B6BB3',
+    fontSize: 16,
+  },
+
+  // TIPP
+  tippContent: {
+    paddingBottom: 40,
+  },
+  tippSubtitle: {
+    fontSize: 14,
+    color: '#666',
+    textAlign: 'center',
+    marginBottom: 20,
+  },
+  tippCard: {
+    backgroundColor: '#fff',
+    borderRadius: 15,
+    padding: 20,
+    marginBottom: 15,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+    elevation: 3,
+  },
+  tippCardActive: {
+    backgroundColor: '#F5F0F8',
+    borderColor: '#9B6BB3',
+    borderWidth: 2,
+  },
+  tippHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  tippIcon: {
+    fontSize: 30,
+    marginRight: 10,
+  },
+  tippLetter: {
+    fontSize: 24,
+    fontWeight: 'bold',
+    color: '#9B6BB3',
+    marginRight: 10,
+  },
+  tippTitle: {
+    fontSize: 18,
+    fontWeight: '600',
+    color: '#5D4E6D',
+  },
+  tippInstruction: {
+    fontSize: 14,
+    color: '#666',
+    marginTop: 15,
+    lineHeight: 22,
+  },
+
+  // Contacts
+  contactsContent: {
+    paddingBottom: 40,
+  },
+  contactSection: {
+    fontSize: 18,
+    fontWeight: '600',
+    color: '#5D4E6D',
+    marginTop: 20,
+    marginBottom: 5,
+  },
+  contactSubtext: {
+    fontSize: 14,
+    color: '#8B7B9B',
+    marginBottom: 15,
+    fontStyle: 'italic',
+  },
+  contactCard: {
+    backgroundColor: '#fff',
+    borderRadius: 15,
+    padding: 15,
+    marginBottom: 10,
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+    elevation: 3,
+  },
+  contactInfo: {
+    flex: 1,
+  },
+  contactName: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#5D4E6D',
+  },
+  contactNumber: {
+    fontSize: 14,
+    color: '#999',
+    marginTop: 2,
+  },
+  contactActions: {
+    flexDirection: 'row',
+    gap: 10,
+  },
+  callButton: {
+    backgroundColor: '#D5F2E8',
+    padding: 10,
+    borderRadius: 10,
+  },
+  textButton: {
+    backgroundColor: '#D5E8F2',
+    padding: 10,
+    borderRadius: 10,
+  },
+  deleteButton: {
+    backgroundColor: '#FFE5E5',
+    padding: 10,
+    borderRadius: 10,
+  },
+  actionIcon: {
+    fontSize: 18,
+  },
+  addContactButton: {
+    borderWidth: 2,
+    borderColor: '#E8D5F2',
+    borderStyle: 'dashed',
+    borderRadius: 15,
+    padding: 20,
+    alignItems: 'center',
+    marginTop: 10,
+  },
+  addContactText: {
+    fontSize: 16,
+    color: '#9B6BB3',
+  },
+  crisisCard: {
+    backgroundColor: '#FFF5F5',
+    borderRadius: 15,
+    padding: 15,
+    marginBottom: 10,
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+  },
+  crisisInfo: {
+    flex: 1,
+  },
+  crisisName: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#5D4E6D',
+  },
+  crisisDesc: {
+    fontSize: 12,
+    color: '#666',
+  },
+  crisisAvailable: {
+    fontSize: 11,
+    color: '#999',
+    marginTop: 2,
+  },
+  crisisHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+  },
+  resetCrisisText: {
+    color: '#9CA3AF',
+    fontSize: 14,
+  },
+  crisisActions: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  crisisCallButton: {
+    backgroundColor: '#FFE5E5',
+    padding: 10,
+    borderRadius: 10,
+  },
+  crisisDeleteButton: {
+    padding: 8,
+  },
+  crisisEditButton: {
+    padding: 8,
+  },
+  crisisNumber: {
+    fontSize: 12,
+    color: '#D46A6A',
+    fontWeight: '600',
+  },
+  addCrisisButton: {
+    borderWidth: 2,
+    borderColor: '#FFE5E5',
+    borderStyle: 'dashed',
+    borderRadius: 15,
+    padding: 20,
+    alignItems: 'center',
+    marginTop: 10,
+    marginBottom: 20,
   },
 
   // Modal
@@ -1586,622 +3063,939 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   modalContent: {
-    width: width * 0.85,
-    backgroundColor: COLORS.card,
+    backgroundColor: '#fff',
     borderRadius: 20,
-    padding: 25,
+    padding: 30,
+    width: '85%',
   },
   modalTitle: {
-    fontSize: 22,
-    fontWeight: '600',
-    color: COLORS.text,
-    textAlign: 'center',
+    fontSize: 20,
+    fontWeight: 'bold',
+    color: '#5D4E6D',
     marginBottom: 20,
+    textAlign: 'center',
   },
   input: {
     borderWidth: 1,
-    borderColor: COLORS.border,
-    borderRadius: 12,
+    borderColor: '#E8D5F2',
+    borderRadius: 10,
     padding: 15,
     fontSize: 16,
     marginBottom: 15,
-    backgroundColor: COLORS.background,
+    color: '#333',
   },
   modalButtons: {
     flexDirection: 'row',
-    gap: 10,
+    justifyContent: 'space-between',
     marginTop: 10,
   },
-  modalButton: {
-    flex: 1,
+  modalCancel: {
     padding: 15,
-    borderRadius: 12,
-    alignItems: 'center',
   },
-  cancelButton: {
-    backgroundColor: COLORS.background,
-  },
-  cancelButtonText: {
-    color: COLORS.textLight,
+  modalCancelText: {
     fontSize: 16,
-    fontWeight: '600',
+    color: '#999',
   },
-  confirmButton: {
-    backgroundColor: COLORS.primary,
+  modalSave: {
+    backgroundColor: '#9B6BB3',
+    padding: 15,
+    paddingHorizontal: 30,
+    borderRadius: 25,
   },
-  confirmButtonText: {
+  modalSaveText: {
+    fontSize: 16,
     color: '#fff',
-    fontSize: 16,
     fontWeight: '600',
   },
 
-  // Dino section
-  dinoSection: {
-    alignItems: 'center',
-    paddingVertical: 20,
+  // Chat
+  chatContainer: {
+    flex: 1,
+    padding: 20,
+    paddingBottom: 10,
   },
-  bigDino: {
-    fontSize: 80,
+  chatHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
     marginBottom: 10,
   },
-  greeting: {
-    fontSize: 24,
-    fontWeight: '600',
-    color: COLORS.text,
+  clearChatText: {
+    color: '#9B6BB3',
+    fontSize: 16,
   },
-  dinoStatus: {
-    fontSize: 14,
-    color: COLORS.textLight,
-    marginTop: 4,
+  chatMessages: {
+    flex: 1,
+    marginBottom: 10,
   },
-  xpToNext: {
-    fontSize: 12,
-    color: COLORS.primary,
-    marginTop: 4,
+  chatMessagesContent: {
+    paddingBottom: 20,
   },
-
-  // Subjects grid
-  subjectsGrid: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    justifyContent: 'center',
-    gap: 15,
-    paddingHorizontal: 10,
-  },
-  subjectCard: {
-    width: width * 0.42,
-    borderRadius: 20,
-    padding: 20,
+  chatWelcome: {
     alignItems: 'center',
+    paddingVertical: 40,
   },
-  subjectIcon: {
-    fontSize: 40,
+  chatDaveImage: {
+    width: 100,
+    height: 100,
+    marginBottom: 20,
+  },
+  chatWelcomeText: {
+    fontSize: 20,
+    color: '#5D4E6D',
+    fontWeight: '600',
     marginBottom: 8,
   },
-  subjectName: {
-    fontSize: 18,
-    fontWeight: '600',
+  chatWelcomeSubtext: {
+    fontSize: 14,
+    color: '#999',
+    textAlign: 'center',
+  },
+  chatBubble: {
+    maxWidth: '80%',
+    padding: 15,
+    borderRadius: 20,
+    marginBottom: 10,
+  },
+  userBubble: {
+    backgroundColor: '#9B6BB3',
+    alignSelf: 'flex-end',
+    borderBottomRightRadius: 5,
+  },
+  daveBubble: {
+    backgroundColor: '#F5F0F8',
+    alignSelf: 'flex-start',
+    borderBottomLeftRadius: 5,
+  },
+  chatBubbleText: {
+    fontSize: 16,
+    lineHeight: 22,
+  },
+  userBubbleText: {
     color: '#fff',
   },
-  subjectProgress: {
-    fontSize: 12,
-    color: 'rgba(255,255,255,0.8)',
-    marginTop: 4,
+  daveBubbleText: {
+    color: '#5D4E6D',
   },
-
-  // Bottom buttons
-  bottomButtons: {
+  chatInputContainer: {
     flexDirection: 'row',
-    justifyContent: 'space-around',
-    paddingVertical: 15,
-    borderTopWidth: 1,
-    borderTopColor: COLORS.border,
-    backgroundColor: COLORS.card,
-  },
-  bottomButton: {
-    alignItems: 'center',
-    padding: 10,
-  },
-  bottomButtonIcon: {
-    fontSize: 24,
-    marginBottom: 4,
-  },
-  bottomButtonText: {
-    fontSize: 12,
-    color: COLORS.textLight,
-  },
-
-  // Quiz
-  quizHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingHorizontal: 20,
-    paddingVertical: 15,
-    backgroundColor: COLORS.card,
-    borderBottomWidth: 1,
-    borderBottomColor: COLORS.border,
-  },
-  quizSubject: {
-    fontSize: 20,
-    fontWeight: '700',
-  },
-  streakBadge: {
-    backgroundColor: COLORS.accent,
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-    borderRadius: 15,
-  },
-  streakText: {
-    fontSize: 14,
-    fontWeight: '600',
-  },
-  sessionStats: {
-    alignItems: 'center',
+    alignItems: 'flex-end',
+    backgroundColor: '#fff',
+    borderRadius: 25,
+    paddingHorizontal: 15,
     paddingVertical: 10,
-  },
-  sessionStatText: {
-    fontSize: 16,
-    color: COLORS.textLight,
-  },
-  questionContainer: {
-    backgroundColor: COLORS.card,
-    borderRadius: 20,
-    padding: 30,
-    margin: 20,
-    alignItems: 'center',
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.1,
-    shadowRadius: 8,
+    shadowRadius: 4,
     elevation: 3,
   },
-  questionText: {
-    fontSize: 28,
-    fontWeight: '600',
-    color: COLORS.text,
-    textAlign: 'center',
+  chatInput: {
+    flex: 1,
+    fontSize: 16,
+    maxHeight: 100,
+    color: '#333',
   },
-  optionsContainer: {
+  sendButton: {
+    backgroundColor: '#9B6BB3',
     paddingHorizontal: 20,
-    gap: 12,
+    paddingVertical: 10,
+    borderRadius: 20,
+    marginLeft: 10,
   },
-  optionButton: {
-    backgroundColor: COLORS.card,
-    borderRadius: 15,
-    padding: 18,
-    alignItems: 'center',
-    borderWidth: 2,
-    borderColor: COLORS.border,
+  sendButtonDisabled: {
+    backgroundColor: '#E8D5F2',
   },
-  optionText: {
-    fontSize: 20,
-    fontWeight: '500',
-    color: COLORS.text,
-  },
-  correctOption: {
-    backgroundColor: COLORS.success,
-    borderColor: COLORS.success,
-  },
-  correctOptionText: {
+  sendButtonText: {
     color: '#fff',
-  },
-  wrongOption: {
-    backgroundColor: COLORS.error,
-    borderColor: COLORS.error,
-  },
-  wrongOptionText: {
-    color: '#fff',
-  },
-  explanationBox: {
-    backgroundColor: '#FFF9E6',
-    borderRadius: 12,
-    padding: 15,
-    margin: 20,
-    marginTop: 10,
-  },
-  explanationText: {
-    fontSize: 14,
-    color: COLORS.text,
-    textAlign: 'center',
-  },
-  nextButton: {
-    margin: 20,
-    padding: 18,
-    borderRadius: 15,
-    alignItems: 'center',
-  },
-  nextButtonText: {
-    fontSize: 18,
     fontWeight: '600',
-    color: '#fff',
-  },
-  celebrateOverlay: {
-    position: 'absolute',
-    top: '40%',
-    left: 0,
-    right: 0,
-    alignItems: 'center',
-  },
-  celebrateText: {
-    fontSize: 32,
-    fontWeight: '700',
-    color: COLORS.success,
-    textShadowColor: 'rgba(0,0,0,0.1)',
-    textShadowOffset: { width: 1, height: 1 },
-    textShadowRadius: 2,
   },
 
-  // Activities
-  sectionTitle: {
-    fontSize: 18,
-    fontWeight: '600',
-    color: COLORS.text,
-    marginBottom: 8,
-    marginTop: 15,
+  // Journal
+  journalContent: {
+    paddingBottom: 40,
   },
-  sectionSubtitle: {
-    fontSize: 14,
-    color: COLORS.textLight,
-    marginBottom: 15,
-  },
-  activityTypes: {
+  journalHeader: {
     flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: 10,
-  },
-  activityType: {
-    width: (width - 60) / 2,
-    backgroundColor: COLORS.card,
-    borderRadius: 15,
-    padding: 15,
+    justifyContent: 'space-between',
     alignItems: 'center',
-    borderWidth: 2,
-    borderColor: COLORS.border,
-  },
-  activityTypeSelected: {
-    borderColor: COLORS.primary,
-    backgroundColor: '#F0EFFF',
-  },
-  activityTypeIcon: {
-    fontSize: 30,
-    marginBottom: 5,
-  },
-  activityTypeName: {
-    fontSize: 14,
-    fontWeight: '500',
-    color: COLORS.text,
-    textAlign: 'center',
-  },
-  activityTypeCoins: {
-    fontSize: 11,
-    color: COLORS.textLight,
-    marginTop: 2,
-  },
-  activityForm: {
-    marginTop: 20,
-    padding: 20,
-    backgroundColor: COLORS.card,
-    borderRadius: 15,
-  },
-  activityFormLabel: {
-    fontSize: 16,
-    fontWeight: '500',
-    color: COLORS.text,
-    marginBottom: 10,
-  },
-  minutesInput: {
-    borderWidth: 1,
-    borderColor: COLORS.border,
-    borderRadius: 12,
-    padding: 15,
-    fontSize: 20,
-    textAlign: 'center',
-    marginBottom: 15,
-    backgroundColor: COLORS.background,
-  },
-  submitActivityButton: {
-    backgroundColor: COLORS.primary,
-    borderRadius: 12,
-    padding: 15,
-    alignItems: 'center',
-  },
-  submitActivityText: {
-    color: '#fff',
-    fontSize: 16,
-    fontWeight: '600',
-  },
-  pendingSection: {
-    marginTop: 25,
-  },
-  pendingActivity: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: COLORS.card,
-    borderRadius: 12,
-    padding: 15,
-    marginBottom: 10,
-  },
-  pendingIcon: {
-    fontSize: 24,
-    marginRight: 12,
-  },
-  pendingInfo: {
-    flex: 1,
-  },
-  pendingName: {
-    fontSize: 16,
-    fontWeight: '500',
-    color: COLORS.text,
-  },
-  pendingDetails: {
-    fontSize: 13,
-    color: COLORS.textLight,
-  },
-  pendingStatus: {
-    fontSize: 20,
-  },
-  pendingHint: {
-    fontSize: 13,
-    color: COLORS.textLight,
-    textAlign: 'center',
-    marginTop: 10,
-    fontStyle: 'italic',
-  },
-
-  // Calm
-  calmContent: {
-    alignItems: 'center',
-    paddingVertical: 20,
-  },
-  calmTitle: {
-    fontSize: 24,
-    fontWeight: '600',
-    color: COLORS.text,
-    marginBottom: 8,
-  },
-  calmSubtitle: {
-    fontSize: 16,
-    color: COLORS.textLight,
-    marginBottom: 25,
-  },
-  calmCard: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: COLORS.card,
-    borderRadius: 15,
-    padding: 20,
-    marginBottom: 12,
-    width: '100%',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.05,
-    shadowRadius: 5,
-    elevation: 2,
-  },
-  calmCardIcon: {
-    fontSize: 36,
-    marginRight: 15,
-  },
-  calmCardText: {
-    flex: 1,
-  },
-  calmCardTitle: {
-    fontSize: 18,
-    fontWeight: '600',
-    color: COLORS.text,
-  },
-  calmCardDesc: {
-    fontSize: 14,
-    color: COLORS.textLight,
-    marginTop: 2,
-  },
-  calmReminder: {
-    backgroundColor: '#F0EFFF',
-    borderRadius: 12,
-    padding: 20,
-    marginTop: 20,
-  },
-  calmReminderText: {
-    fontSize: 14,
-    color: COLORS.primary,
-    textAlign: 'center',
-    lineHeight: 20,
-  },
-
-  // Stats
-  statsOverview: {
-    flexDirection: 'row',
-    justifyContent: 'space-around',
-    backgroundColor: COLORS.card,
-    borderRadius: 15,
-    padding: 20,
     marginBottom: 20,
   },
-  statItem: {
-    alignItems: 'center',
+  historyToggle: {
+    color: '#9B6BB3',
+    fontSize: 16,
   },
-  statValue: {
-    fontSize: 24,
-    fontWeight: '700',
-    color: COLORS.text,
-  },
-  statLabel: {
-    fontSize: 12,
-    color: COLORS.textLight,
-    marginTop: 4,
-  },
-  subjectStat: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: COLORS.card,
-    borderRadius: 12,
-    padding: 15,
-    marginBottom: 10,
-  },
-  subjectStatIcon: {
-    fontSize: 28,
-    marginRight: 15,
-  },
-  subjectStatInfo: {
-    flex: 1,
-  },
-  subjectStatName: {
+  journalLabel: {
     fontSize: 16,
     fontWeight: '600',
-    color: COLORS.text,
+    color: '#5D4E6D',
+    marginBottom: 15,
+    marginTop: 10,
   },
-  subjectStatDetails: {
-    fontSize: 13,
-    color: COLORS.textLight,
-    marginTop: 2,
-  },
-  achievementsGrid: {
+  moodSelector: {
     flexDirection: 'row',
     flexWrap: 'wrap',
     gap: 10,
-    marginTop: 10,
+    marginBottom: 20,
   },
-  achievement: {
-    width: (width - 60) / 3,
-    backgroundColor: COLORS.card,
-    borderRadius: 12,
-    padding: 12,
+  moodButton: {
     alignItems: 'center',
+    padding: 12,
+    borderRadius: 15,
+    backgroundColor: '#fff',
+    width: '30%',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.1,
+    shadowRadius: 2,
+    elevation: 2,
   },
-  achievementLocked: {
-    opacity: 0.5,
+  moodButtonSelected: {
+    backgroundColor: '#E8D5F2',
+    borderColor: '#9B6BB3',
+    borderWidth: 2,
   },
-  achievementIcon: {
+  moodEmoji: {
     fontSize: 28,
-    marginBottom: 4,
   },
-  achievementIconLocked: {
-    fontSize: 28,
-    marginBottom: 4,
+  moodLabel: {
+    fontSize: 12,
+    color: '#666',
+    marginTop: 5,
   },
-  achievementName: {
-    fontSize: 11,
-    fontWeight: '500',
-    color: COLORS.text,
-    textAlign: 'center',
-  },
-  achievementNameLocked: {
-    fontSize: 11,
-    color: COLORS.textLight,
-    textAlign: 'center',
-  },
-
-  // Parent mode
-  verifyCard: {
-    backgroundColor: COLORS.card,
-    borderRadius: 12,
-    padding: 15,
-    marginBottom: 12,
-  },
-  verifyInfo: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginBottom: 12,
-  },
-  verifyIcon: {
-    fontSize: 32,
-    marginRight: 12,
-  },
-  verifyName: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: COLORS.text,
-  },
-  verifyDetails: {
-    fontSize: 14,
-    color: COLORS.textLight,
-  },
-  verifyButtons: {
-    flexDirection: 'row',
-    gap: 10,
-  },
-  verifyYes: {
-    flex: 1,
-    backgroundColor: COLORS.success,
-    borderRadius: 10,
-    padding: 12,
-    alignItems: 'center',
-  },
-  verifyYesText: {
-    color: '#fff',
-    fontSize: 16,
-    fontWeight: '600',
-  },
-  verifyNo: {
-    backgroundColor: COLORS.error,
-    borderRadius: 10,
-    padding: 12,
-    paddingHorizontal: 20,
-    alignItems: 'center',
-  },
-  verifyNoText: {
-    color: '#fff',
-    fontSize: 16,
-    fontWeight: '600',
-  },
-  emptyState: {
-    alignItems: 'center',
-    padding: 30,
-  },
-  emptyStateText: {
-    fontSize: 16,
-    color: COLORS.textLight,
-  },
-  parentSummary: {
-    backgroundColor: COLORS.card,
-    borderRadius: 12,
-    padding: 15,
-    marginTop: 10,
-  },
-  parentSummaryItem: {
-    fontSize: 15,
-    color: COLORS.text,
-    paddingVertical: 6,
-  },
-  parentTip: {
-    fontSize: 13,
-    color: COLORS.textLight,
-    textAlign: 'center',
-    marginTop: 25,
-    fontStyle: 'italic',
-    paddingHorizontal: 10,
-  },
-
-  // Achievement popup
-  achievementPopup: {
-    position: 'absolute',
-    top: 100,
-    left: 20,
-    right: 20,
-    backgroundColor: COLORS.accent,
+  journalInput: {
+    backgroundColor: '#fff',
     borderRadius: 15,
     padding: 20,
+    fontSize: 16,
+    minHeight: 150,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+    elevation: 3,
+    color: '#333',
+  },
+  saveJournalButton: {
+    backgroundColor: '#9B6BB3',
+    padding: 18,
+    borderRadius: 25,
+    alignItems: 'center',
+    marginTop: 20,
+  },
+  saveJournalText: {
+    color: '#fff',
+    fontSize: 18,
+    fontWeight: '600',
+  },
+  noEntriesText: {
+    textAlign: 'center',
+    color: '#999',
+    marginTop: 40,
+    fontSize: 16,
+  },
+  journalEntryCard: {
+    backgroundColor: '#fff',
+    borderRadius: 15,
+    padding: 20,
+    marginBottom: 15,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+    elevation: 3,
+  },
+  journalEntryHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 10,
+  },
+  journalEntryMood: {
+    fontSize: 24,
+    marginRight: 10,
+  },
+  journalEntryDate: {
+    flex: 1,
+    fontSize: 14,
+    color: '#999',
+  },
+  deleteEntryText: {
+    fontSize: 18,
+  },
+  journalEntryContent: {
+    fontSize: 16,
+    color: '#5D4E6D',
+    lineHeight: 24,
+  },
+  journalButton: {
+    backgroundColor: '#9B6BB3',
+    paddingVertical: 20,
+    paddingHorizontal: 40,
+    borderRadius: 30,
+    flexDirection: 'row',
     alignItems: 'center',
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 4 },
     shadowOpacity: 0.2,
-    shadowRadius: 10,
+    shadowRadius: 8,
     elevation: 5,
-    zIndex: 1000,
   },
-  achievementPopupIcon: {
-    fontSize: 40,
-    marginBottom: 8,
+  journalButtonIcon: {
+    fontSize: 28,
+    marginRight: 12,
   },
-  achievementPopupTitle: {
+  journalButtonText: {
+    color: '#fff',
+    fontSize: 20,
+    fontWeight: '600',
+  },
+
+  // Drawing
+  drawContainer: {
+    flex: 1,
+    padding: 20,
+  },
+  drawHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 15,
+  },
+  clearDrawText: {
+    color: '#9B6BB3',
+    fontSize: 16,
+  },
+  drawHeaderButtons: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 15,
+  },
+  saveDrawButton: {
+    backgroundColor: '#E8D5F2',
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 15,
+  },
+  saveDrawText: {
+    color: '#9B6BB3',
     fontSize: 14,
-    color: COLORS.text,
-    marginBottom: 4,
+    fontWeight: '600',
   },
-  achievementPopupName: {
+  colorPicker: {
+    flexDirection: 'row',
+    justifyContent: 'center',
+    gap: 10,
+    marginBottom: 15,
+  },
+  colorButton: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    borderWidth: 2,
+    borderColor: 'transparent',
+  },
+  colorButtonSelected: {
+    borderColor: '#333',
+    transform: [{ scale: 1.2 }],
+  },
+  brushSizes: {
+    flexDirection: 'row',
+    justifyContent: 'center',
+    gap: 15,
+    marginBottom: 15,
+  },
+  brushButton: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    backgroundColor: '#fff',
+    justifyContent: 'center',
+    alignItems: 'center',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.1,
+    shadowRadius: 2,
+    elevation: 2,
+  },
+  brushButtonSelected: {
+    backgroundColor: '#E8D5F2',
+    borderColor: '#9B6BB3',
+    borderWidth: 2,
+  },
+  brushPreview: {
+    borderRadius: 50,
+  },
+  canvasContainer: {
+    flex: 1,
+    marginBottom: 10,
+  },
+  canvas: {
+    flex: 1,
+    backgroundColor: '#fff',
+    borderRadius: 20,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+    elevation: 3,
+    overflow: 'hidden',
+  },
+
+  // Safety Plan
+  safetyContent: {
+    paddingBottom: 40,
+  },
+  safetyDave: {
+    width: 60,
+    height: 60,
+    alignSelf: 'center',
+    marginBottom: 10,
+  },
+  safetySubtitle: {
+    fontSize: 14,
+    color: '#666',
+    textAlign: 'center',
+    marginBottom: 24,
+    paddingHorizontal: 20,
+  },
+  safetyLabel: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#374151',
+    marginBottom: 10,
+    marginTop: 16,
+  },
+  safetyInput: {
+    backgroundColor: '#fff',
+    borderRadius: 15,
+    padding: 16,
+    fontSize: 16,
+    minHeight: 60,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.05,
+    shadowRadius: 2,
+    elevation: 1,
+    color: '#333',
+  },
+  supportPersonRow: {
+    flexDirection: 'row',
+    gap: 10,
+    marginBottom: 10,
+  },
+  supportNameInput: {
+    flex: 1,
+    minHeight: 50,
+  },
+  supportPhoneInput: {
+    flex: 1,
+    minHeight: 50,
+  },
+  addPersonButton: {
+    padding: 12,
+    alignItems: 'center',
+  },
+  addPersonText: {
+    color: '#8B5CF6',
+    fontSize: 14,
+  },
+  saveSafetyButton: {
+    backgroundColor: '#8B5CF6',
+    padding: 18,
+    borderRadius: 25,
+    alignItems: 'center',
+    marginTop: 24,
+  },
+  saveSafetyText: {
+    color: '#fff',
     fontSize: 18,
-    fontWeight: '700',
-    color: COLORS.text,
+    fontWeight: '600',
+  },
+  safetyNote: {
+    backgroundColor: '#F5F0FF',
+    padding: 16,
+    borderRadius: 12,
+    marginTop: 16,
+  },
+  safetyNoteText: {
+    color: '#8B5CF6',
+    fontSize: 14,
+    textAlign: 'center',
+  },
+
+  // Anchors
+  anchorsSubtitle: {
+    fontSize: 14,
+    color: '#666',
+    textAlign: 'center',
+    marginBottom: 20,
+  },
+  anchorsGrid: {
+    flex: 1,
+  },
+  anchorsGridContent: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 12,
+    paddingBottom: 20,
+  },
+  anchorCard: {
+    width: '47%',
+    backgroundColor: '#fff',
+    borderRadius: 16,
+    overflow: 'hidden',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+    elevation: 3,
+  },
+  anchorImage: {
+    width: '100%',
+    height: 120,
+  },
+  anchorImagePlaceholder: {
+    backgroundColor: '#F0F0F5',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  anchorPlaceholderIcon: {
+    fontSize: 32,
+    marginBottom: 5,
+  },
+  anchorPlaceholderText: {
+    fontSize: 12,
+    color: '#999',
+  },
+  anchorCaption: {
+    padding: 10,
+    fontSize: 14,
+    color: '#5D4E6D',
+    textAlign: 'center',
+  },
+  addAnchorButton: {
+    width: '47%',
+    height: 150,
+    backgroundColor: '#F5F0FF',
+    borderRadius: 16,
+    borderWidth: 2,
+    borderColor: '#E8D5F2',
+    borderStyle: 'dashed',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  addAnchorIcon: {
+    fontSize: 32,
+    color: '#8B5CF6',
+  },
+  addAnchorText: {
+    fontSize: 14,
+    color: '#8B5CF6',
+    marginTop: 8,
+  },
+  anchorModalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.9)',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  anchorModalContent: {
+    width: '90%',
+    alignItems: 'center',
+  },
+  anchorModalImage: {
+    width: '100%',
+    height: 300,
+    borderRadius: 16,
+  },
+  anchorModalCaption: {
+    fontSize: 18,
+    color: '#fff',
+    marginTop: 16,
+    textAlign: 'center',
+  },
+  anchorModalButtons: {
+    flexDirection: 'row',
+    gap: 16,
+    marginTop: 24,
+  },
+  anchorCloseButton: {
+    backgroundColor: '#fff',
+    paddingVertical: 12,
+    paddingHorizontal: 32,
+    borderRadius: 25,
+  },
+  anchorCloseText: {
+    fontSize: 16,
+    color: '#333',
+    fontWeight: '500',
+  },
+  anchorDeleteButton: {
+    backgroundColor: '#FFE5E5',
+    paddingVertical: 12,
+    paddingHorizontal: 24,
+    borderRadius: 25,
+  },
+  anchorDeleteText: {
+    fontSize: 16,
+    color: '#D46A6A',
+  },
+  captionHint: {
+    fontSize: 14,
+    color: '#666',
+    marginBottom: 16,
+    textAlign: 'center',
+  },
+
+  // Pause Notes
+  pauseContent: {
+    paddingBottom: 40,
+  },
+  pauseHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 20,
+  },
+  pauseCard: {
+    backgroundColor: '#fff',
+    borderRadius: 15,
+    padding: 20,
+    marginBottom: 15,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+    elevation: 3,
+  },
+  pauseCardHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 10,
+  },
+  pauseLabel: {
+    fontSize: 18,
+    fontWeight: '600',
+    color: '#5D4E6D',
+  },
+  pauseCardActions: {
+    flexDirection: 'row',
+    gap: 10,
+  },
+  pauseMessage: {
+    fontSize: 15,
+    color: '#666',
+    lineHeight: 22,
+    marginBottom: 15,
+  },
+  pauseButtons: {
+    flexDirection: 'row',
+    gap: 10,
+  },
+  pauseCopyButton: {
+    backgroundColor: '#E8D5F2',
+    paddingVertical: 10,
+    paddingHorizontal: 20,
+    borderRadius: 20,
+    flex: 1,
+    alignItems: 'center',
+  },
+  pauseCopyText: {
+    color: '#9B6BB3',
+    fontWeight: '600',
+  },
+  pauseShareButton: {
+    backgroundColor: '#9B6BB3',
+    paddingVertical: 10,
+    paddingHorizontal: 20,
+    borderRadius: 20,
+    flex: 1,
+    alignItems: 'center',
+  },
+  pauseShareText: {
+    color: '#fff',
+    fontWeight: '600',
+  },
+  addPauseButton: {
+    backgroundColor: '#9B6BB3',
+    paddingVertical: 15,
+    paddingHorizontal: 30,
+    borderRadius: 25,
+    alignItems: 'center',
+    marginTop: 10,
+  },
+  addPauseText: {
+    color: '#fff',
+    fontSize: 16,
+    fontWeight: '600',
+  },
+  resetPauseText: {
+    color: '#9B6BB3',
+    fontSize: 16,
+  },
+  pauseSubtitle: {
+    fontSize: 14,
+    color: '#666',
+    textAlign: 'center',
+    marginBottom: 20,
+    lineHeight: 20,
+  },
+  pauseEditBtn: {
+    padding: 5,
+  },
+  pauseDeleteBtn: {
+    padding: 5,
+  },
+  pauseActions: {
+    flexDirection: 'row',
+    gap: 10,
+  },
+  copyButton: {
+    backgroundColor: '#E8D5F2',
+    paddingVertical: 10,
+    paddingHorizontal: 20,
+    borderRadius: 20,
+    flex: 1,
+    alignItems: 'center',
+  },
+  copyButtonText: {
+    color: '#9B6BB3',
+    fontWeight: '600',
+  },
+  shareButton: {
+    backgroundColor: '#9B6BB3',
+    paddingVertical: 10,
+    paddingHorizontal: 20,
+    borderRadius: 20,
+    flex: 1,
+    alignItems: 'center',
+  },
+  shareButtonText: {
+    color: '#fff',
+    fontWeight: '600',
+  },
+  daveHint: {
+    fontSize: 14,
+    color: '#9B6BB3',
+    textAlign: 'center',
+    marginTop: 20,
+    fontStyle: 'italic',
+  },
+  pauseMessageInput: {
+    minHeight: 100,
+    textAlignVertical: 'top',
+  },
+
+  // Shred It
+  shredSubtitle: {
+    fontSize: 14,
+    color: '#666',
+    textAlign: 'center',
+    marginBottom: 20,
+  },
+  shredPaper: {
+    backgroundColor: '#fff',
+    borderRadius: 15,
+    padding: 20,
+    minHeight: 200,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+    elevation: 3,
+    marginBottom: 20,
+  },
+  shredInput: {
+    fontSize: 16,
+    color: '#333',
+    minHeight: 160,
+    textAlignVertical: 'top',
+  },
+  shredButtons: {
+    flexDirection: 'row',
+    justifyContent: 'center',
+    gap: 15,
+  },
+  shredButton: {
+    backgroundColor: '#9B6BB3',
+    paddingVertical: 15,
+    paddingHorizontal: 25,
+    borderRadius: 25,
+    alignItems: 'center',
+    flex: 1,
+  },
+  binButton: {
+    backgroundColor: '#5D4E6D',
+    paddingVertical: 15,
+    paddingHorizontal: 25,
+    borderRadius: 25,
+    alignItems: 'center',
+    flex: 1,
+  },
+  shredButtonDisabled: {
+    opacity: 0.5,
+  },
+  shredButtonIcon: {
+    fontSize: 24,
+    marginBottom: 5,
+  },
+  shredButtonText: {
+    color: '#fff',
+    fontWeight: '600',
+    fontSize: 14,
+  },
+  binButtonText: {
+    color: '#fff',
+    fontWeight: '600',
+    fontSize: 14,
+  },
+
+  // SOS Mode
+  sosContainer: {
+    flex: 1,
+    backgroundColor: '#FAFAFF',
+    padding: 20,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  sosHeader: {
+    alignItems: 'center',
+    marginBottom: 40,
+  },
+  sosEmoji: {
+    fontSize: 60,
+    marginBottom: 15,
+  },
+  sosTitle: {
+    fontSize: 28,
+    fontWeight: 'bold',
+    color: '#5D4E6D',
+    marginBottom: 10,
+  },
+  sosSubtitle: {
+    fontSize: 16,
+    color: '#666',
+  },
+  sosTools: {
+    flexDirection: 'row',
+    justifyContent: 'center',
+    gap: 20,
+    marginBottom: 40,
+  },
+  sosTool: {
+    backgroundColor: '#fff',
+    borderRadius: 20,
+    padding: 25,
+    alignItems: 'center',
+    width: 100,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.15,
+    shadowRadius: 8,
+    elevation: 5,
+  },
+  sosToolIcon: {
+    fontSize: 40,
+    marginBottom: 10,
+  },
+  sosToolLabel: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#5D4E6D',
+  },
+  sosCallButton: {
+    backgroundColor: '#9B6BB3',
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 18,
+    paddingHorizontal: 30,
+    borderRadius: 30,
+    marginBottom: 30,
+  },
+  sosCallIcon: {
+    fontSize: 24,
+    marginRight: 10,
+  },
+  sosCallText: {
+    color: '#fff',
+    fontSize: 18,
+    fontWeight: '600',
+  },
+  sosMessage: {
+    fontSize: 16,
+    color: '#9B6BB3',
+    fontStyle: 'italic',
+  },
+
+  // Wins Jar
+  winsContent: {
+    paddingBottom: 40,
+  },
+  winsSubtitle: {
+    fontSize: 14,
+    color: '#666',
+    textAlign: 'center',
+    marginBottom: 20,
+  },
+  addWinButton: {
+    backgroundColor: '#9B6BB3',
+    paddingVertical: 15,
+    paddingHorizontal: 30,
+    borderRadius: 25,
+    alignItems: 'center',
+    marginBottom: 20,
+  },
+  addWinText: {
+    color: '#fff',
+    fontSize: 16,
+    fontWeight: '600',
+  },
+  emptyWins: {
+    alignItems: 'center',
+    paddingVertical: 40,
+  },
+  emptyWinsIcon: {
+    fontSize: 50,
+    marginBottom: 15,
+  },
+  emptyWinsText: {
+    fontSize: 18,
+    color: '#5D4E6D',
+    marginBottom: 10,
+  },
+  emptyWinsHint: {
+    fontSize: 14,
+    color: '#999',
+    textAlign: 'center',
+  },
+  winCard: {
+    backgroundColor: '#fff',
+    borderRadius: 15,
+    padding: 15,
+    marginBottom: 10,
+    flexDirection: 'row',
+    alignItems: 'center',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+    elevation: 3,
+  },
+  winContent: {
+    flex: 1,
+  },
+  winText: {
+    fontSize: 16,
+    color: '#5D4E6D',
+    marginBottom: 5,
+  },
+  winDate: {
+    fontSize: 12,
+    color: '#999',
+  },
+  winDelete: {
+    fontSize: 18,
+    padding: 5,
   },
 });
