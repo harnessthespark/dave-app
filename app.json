@@ -2,7 +2,7 @@
   "expo": {
     "name": "Dave",
     "slug": "dave-app",
-    "version": "1.0.0",
+    "version": "1.11.0",
     "orientation": "default",
     "icon": "./assets/dave.png",
     "userInterfaceStyle": "light",
@@ -13,9 +13,9 @@
       "backgroundColor": "#FAFAFF"
     },
     "ios": {
-      "supportsTablet": false,
+      "supportsTablet": true,
       "bundleIdentifier": "com.lisagills.dave",
-      "buildNumber": "8",
+      "buildNumber": "13",
       "infoPlist": {
         "ITSAppUsesNonExemptEncryption": false,
         "NSPhotoLibraryUsageDescription": "Dave needs access to your photos to add calming images to your Anchors and save your drawings.",
@@ -30,7 +30,7 @@
       },
       "edgeToEdgeEnabled": true,
       "package": "com.lisagills.dave",
-      "versionCode": 3
+      "versionCode": 9
     },
     "web": {
       "favicon": "./assets/dave.png"
